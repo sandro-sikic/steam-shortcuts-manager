@@ -1,4 +1,5 @@
 import { artworkCacheDir, copyCachedToGrid, fillCache } from './artwork/cache.js';
+import { removeTaggedArtwork } from './artwork/grid.js';
 import type { ArtworkOutcome } from './artwork/install.js';
 import { SteamGridDbClient, type FetchLike } from './artwork/steamgriddb.js';
 import { configDir, loadConfig } from './config.js';
@@ -178,6 +179,11 @@ async function applyGames(
     await ensureSteamClosed(ctx, options);
     const backup = await saveShortcuts(user.configDir, result.entries);
     if (backup) ctx.log(`Backed up previous shortcuts to ${backup}`);
+    // Take our artwork away with the shortcut. Only files carrying our tag go; the user's own images stay.
+    for (const item of result.removed) {
+      const { removed, kept } = await removeTaggedArtwork(user.gridDir, item.appId);
+      if (removed + kept > 0) ctx.log(`  ${item.title}: removed ${removed} of our images from Steam's artwork folder${kept > 0 ? `, kept ${kept} that are not ours` : ''}`);
+    }
   }
   await fetchArtwork(ctx, user, [...result.added, ...result.updated, ...result.unchanged], options);
   return result;

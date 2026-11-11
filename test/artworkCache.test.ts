@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { artworkCacheDir, cacheKey, copyCachedToGrid, fillCache, isPending, MISSING_TTL_MS, readCache, readCachedArtwork } from '../src/artwork/cache.js';
 import { cacheArtworkUrl, mimeOf } from '../src/artwork/files.js';
+import { isTagged, tagImage } from '../src/artwork/tag.js';
 import { ARTWORK_KINDS } from '../src/artwork/kinds.js';
 import { cleanupTempDirs, fakeFetch, makeTempDir } from './helpers.js';
 
@@ -116,7 +117,8 @@ describe('fillCache', () => {
     expect(outcomes.map((x) => [x.kind, x.status])).toEqual([['poster', 'saved'], ['wide', 'missing'], ['hero', 'saved'], ['logo', 'missing'], ['icon', 'saved']]);
     const dir = path.join(o.cacheRoot, cacheKey('Hades') as string);
     expect((await readdir(dir)).sort()).toEqual(['hero.png', 'icon.ico', 'meta.json', 'poster.png']);
-    expect(await readFile(path.join(dir, 'poster.png'), 'utf8')).toBe('IMG:https://c/p.png');
+    expect(await readFile(path.join(dir, 'poster.png'), 'utf8')).toMatch(/^IMG:https:\/\/c\/p\.png/);
+    expect(isTagged(await readFile(path.join(dir, 'poster.png')))).toBe(true);
     expect(JSON.parse(await readFile(path.join(dir, 'meta.json'), 'utf8'))).toEqual({ title: 'Hades', missing: { wide: NOW, logo: NOW } });
   });
 
@@ -146,7 +148,8 @@ describe('fillCache', () => {
     await writeFile(path.join(dir, 'poster.png'), 'OLD');
     const forced = await fillCache({ ...o, force: true, client: client() });
     expect(forced.every((x) => x.status === 'saved')).toBe(true);
-    expect(await readFile(path.join(dir, 'poster.png'), 'utf8')).toBe('IMG:https://c/p.png');
+    expect(await readFile(path.join(dir, 'poster.png'), 'utf8')).toMatch(/^IMG:https:\/\/c\/p\.png/);
+    expect(isTagged(await readFile(path.join(dir, 'poster.png')))).toBe(true);
   });
 
   it('does not record failures as missing, so they are retried', async () => {
@@ -186,6 +189,14 @@ describe('copyCachedToGrid', () => {
     const outcomes = await copyCachedToGrid(o);
     expect(outcomes.map((x) => [x.kind, x.status])).toEqual([['poster', 'saved'], ['wide', 'missing'], ['hero', 'saved'], ['logo', 'missing'], ['icon', 'saved']]);
     expect((await readdir(o.gridDir)).sort()).toEqual(['42_hero.jpg', '42_icon.ico', '42p.png']);
+  });
+
+  it('tags every copy as ours, including images cached before tagging existed', async () => {
+    const o = await setup();
+    await writeFile(path.join(o.cacheRoot, cacheKey('Hades') as string, 'icon.ico'), tagImage(Buffer.from('already tagged')));
+    await copyCachedToGrid(o);
+    for (const name of await readdir(o.gridDir)) expect(isTagged(await readFile(path.join(o.gridDir, name)))).toBe(true);
+    expect(isTagged(await readFile(path.join(o.cacheRoot, cacheKey('Hades') as string, 'poster.png')))).toBe(false); // the cache itself is not rewritten
   });
 
   it('keeps an image Steam already has (whatever its format) unless forced', async () => {

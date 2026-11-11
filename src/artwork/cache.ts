@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
-import { copyFile, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { listDir, readJsonIfExists } from '../integrations/shared/fs.js';
 import { listArtwork, mimeOf, type ArtworkResponse } from './files.js';
 import { type ArtworkOutcome, installArtwork } from './install.js';
 import { ARTWORK_KINDS, ARTWORK_SUFFIXES, type ArtworkKind } from './kinds.js';
+import { tagImage } from './tag.js';
 import { titleKey, type FetchLike, type SteamGridDbClient } from './steamgriddb.js';
 
 /** How long "SteamGridDB has no such image" is trusted before asking again. */
@@ -142,7 +143,8 @@ export async function copyCachedToGrid(options: {
     else if (cached !== undefined && entry !== undefined) {
       await mkdir(gridDir, { recursive: true });
       const target = path.join(gridDir, `${appId}${ARTWORK_SUFFIXES[kind]}${path.extname(cached.file)}`);
-      await copyFile(path.join(entry.dir, cached.file), target);
+      // Tagging is idempotent; it marks images cached before tagging existed, so Steam's copies are always ours to recognise.
+      await writeFile(target, tagImage(await readFile(path.join(entry.dir, cached.file))));
       outcomes.push({ kind, status: 'saved', file: target });
     } else if (failed.has(kind)) outcomes.push({ kind, status: 'failed', error: failed.get(kind) });
     else outcomes.push({ kind, status: 'missing' });

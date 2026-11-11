@@ -2,6 +2,7 @@ import { mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ARTWORK_KINDS, ARTWORK_SUFFIXES as SUFFIXES, type ArtworkKind } from './kinds.js';
 import type { FetchLike, SteamGridDbClient } from './steamgriddb.js';
+import { tagImage } from './tag.js';
 
 export { ARTWORK_KINDS };
 
@@ -69,7 +70,7 @@ export async function installArtwork(options: InstallArtworkOptions): Promise<Ar
         if (!force && (await exists(file))) return { kind, status: 'exists', file };
         const response = await fetchFn(url);
         if (!response.ok) throw new Error(`Download failed with HTTP ${response.status}`);
-        await writeFile(file, Buffer.from(await response.arrayBuffer()));
+        await writeFile(file, tagImage(Buffer.from(await response.arrayBuffer())));
         return { kind, status: 'saved', file };
       } catch (error) {
         return { kind, status: 'failed', error: (error as Error).message };

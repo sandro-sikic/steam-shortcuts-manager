@@ -106,6 +106,13 @@ on the cards as they arrive. Quit at any point and it resumes next time, fetchin
   Its search is fuzzy, so a near miss would show another game's art; no exact match means placeholders.
 - **Sync copies from the cache** into Steam's grid folder (`userdata/<id>/config/grid`, named by the shortcut ID), so adding a
   game needs no second download. An image already in Steam's folder is kept; the library and game page prefer it over the cache.
+- **Every image is tagged as ours.** The moment an image is downloaded, "Steam Manager (steam-manager:artwork)" is written into the
+  file: a standard text chunk in PNGs, a standard comment in JPEGs (after the JFIF/Exif headers), and a short footer after
+  the image data for ICO and WebP, which have no safe metadata place and whose decoders ignore trailing bytes. Pixels and other
+  metadata are unchanged. Images cached before tagging existed are tagged when they are copied into Steam.
+- **Removing a game takes only our images with it.** When a shortcut is removed (unchecked, pruned, or replaced), sync deletes the
+  files in Steam's grid folder that are named for that shortcut's ID **and** carry our tag. Anything else with that name, such as
+  an image you made, stays, and the log says how many were kept. Images copied before tagging existed have no tag and are left in place.
 - **Controls:** Settings > Artwork can turn the automatic download off, and chooses which images are copied into Steam.
   The game page's **Download artwork** and **Download again** fetch one game on demand.
 - **The page never touches files:** the desktop app serves images through a `steam-manager-art://` scheme

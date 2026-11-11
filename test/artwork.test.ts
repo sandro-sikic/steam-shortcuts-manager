@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { ARTWORK_KINDS, installArtwork } from '../src/artwork/install.js';
 import { SteamGridDbClient } from '../src/artwork/steamgriddb.js';
+import { isTagged } from '../src/artwork/tag.js';
 import { cleanupTempDirs, fakeFetch, makeTempDir } from './helpers.js';
 
 afterEach(cleanupTempDirs);
@@ -83,7 +84,9 @@ describe('installArtwork', () => {
     const outcomes = await installArtwork({ gridDir, appId: 42, title: 'T', client: stubClient(base), fetchFn: fakeFetch(images) });
     expect(outcomes.map((o) => o.status)).toEqual(['saved', 'saved', 'saved', 'saved', 'saved']);
     expect((await readdir(gridDir)).sort()).toEqual(['42.jpg', '42_hero.png', '42_icon.png', '42_logo.png', '42p.png']);
-    expect(await readFile(path.join(gridDir, '42p.png'))).toEqual(image);
+    const saved = await readFile(path.join(gridDir, '42p.png'));
+    expect(saved.subarray(0, image.length)).toEqual(image);
+    expect(isTagged(saved)).toBe(true);
   });
 
   it('skips files that already exist unless forced', async () => {
@@ -99,7 +102,9 @@ describe('installArtwork', () => {
 
     const forced = await installArtwork({ gridDir, appId: 42, title: 'T', client: stubClient(urls), fetchFn, force: true });
     expect(forced[0]).toMatchObject({ status: 'saved' });
-    expect(await readFile(path.join(gridDir, '42p.png'))).toEqual(image);
+    const saved = await readFile(path.join(gridDir, '42p.png'));
+    expect(saved.subarray(0, image.length)).toEqual(image);
+    expect(isTagged(saved)).toBe(true);
   });
 
   it('reports kinds SteamGridDB has no image for', async () => {

@@ -612,8 +612,8 @@ describe('api artwork', () => {
     expect(result.items.map((i) => i.kind)).toEqual(['poster', 'hero', 'icon']);
     expect(result.items[0]?.url).toContain('steam-manager-art://cache/');
     expect(result.pending).toBe(false);
-    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'poster.png'), 'utf8')).toBe('POSTER');
-    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'hero.jpg'), 'utf8')).toBe('HERO');
+    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'poster.png'), 'utf8')).toMatch(/^POSTER/);
+    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'hero.jpg'), 'utf8')).toMatch(/^HERO/);
     await expect(readFile(path.join(grid(configDir), '7p.png'))).rejects.toThrow();
   });
 
@@ -629,7 +629,7 @@ describe('api artwork', () => {
     expect(fetchFn.requests[0]?.auth).toBe('Bearer savedkey');
     const forced = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: true });
     expect(forced.outcomes[0]).toMatchObject({ kind: 'poster', status: 'saved' });
-    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'poster.png'), 'utf8')).toBe('POSTER');
+    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'poster.png'), 'utf8')).toMatch(/^POSTER/);
   });
 
   it('reports failures per image instead of throwing, and leaves the game pending so it is retried', async () => {

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../src/app.js';
 import { createProgram } from '../src/cli.js';
+import { tagImage } from '../src/artwork/tag.js';
 import { osIntegration } from '../src/integrations/os/index.js';
 import { buildShortcut, computeAppId, MANAGED_TAG } from '../src/steam/shortcuts.js';
 import { loadShortcuts, saveShortcuts } from '../src/steam/store.js';
@@ -117,6 +118,72 @@ describe('switched-off games', () => {
     await exclude(home, ['Ubisoft Connect:720']);
     await run('sync', '--no-artwork');
     expect(await loadShortcuts(configDir)).toEqual([]);
+  });
+});
+
+describe('removing a game takes its own images along', () => {
+  const id = computeAppId('"/games/fortnite"', 'Fortnite');
+  const ours = (text: string) => tagImage(Buffer.from(text));
+
+  async function synced(over: { kept?: boolean } = {}) {
+    const t = await setup({ integrations: [integration([fortnite])] });
+    await t.run('sync', '--no-artwork');
+    const grid = path.join(t.configDir, 'grid');
+    await mkdir(grid, { recursive: true });
+    await writeFile(path.join(grid, `${id}p.png`), ours('poster'));
+    await writeFile(path.join(grid, `${id}_icon.ico`), ours('icon'));
+    await writeFile(path.join(grid, '999p.png'), ours('another game'));
+    if (over.kept) await writeFile(path.join(grid, `${id}_hero.png`), 'the user made this');
+    t.logs.length = 0;
+    return { ...t, grid };
+  }
+  const switchOff = async (home: string) => {
+    const dir = path.join(home, '.config', 'steam-manager');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'config.json'), JSON.stringify({ exclude: ['Epic Games:fn'] }));
+  };
+
+  it('deletes only the images carrying our tag, and says what it kept', async () => {
+    const t = await synced({ kept: true });
+    await switchOff(t.home);
+    await t.run('sync', '--no-artwork');
+    expect(t.logs).toContain("  Fortnite: removed 2 of our images from Steam's artwork folder, kept 1 that are not ours");
+    expect((await readdir(t.grid)).sort()).toEqual([`${id}_hero.png`, '999p.png']);
+    expect(await readFile(path.join(t.grid, `${id}_hero.png`), 'utf8')).toBe('the user made this');
+  });
+
+  it('says nothing about images when everything was ours or there were none', async () => {
+    const t = await synced();
+    await switchOff(t.home);
+    await t.run('sync', '--no-artwork');
+    expect(t.logs).toContain("  Fortnite: removed 2 of our images from Steam's artwork folder");
+    expect(await readdir(t.grid)).toEqual(['999p.png']);
+
+    const bare = await setup({ integrations: [integration([fortnite])] });
+    await bare.run('sync', '--no-artwork');
+    await switchOff(bare.home);
+    bare.logs.length = 0;
+    await bare.run('sync', '--no-artwork');
+    expect(bare.logs.some((line) => line.includes('our images'))).toBe(false);
+  });
+
+  it('also does it when pruning games that are gone', async () => {
+    const t = await synced();
+    t.ctx.integrations = [integration([])];
+    await t.run('sync', '--no-artwork', '--prune');
+    expect(t.logs).toContain("  Fortnite: removed 2 of our images from Steam's artwork folder");
+    expect(await readdir(t.grid)).toEqual(['999p.png']);
+  });
+
+  it('deletes nothing on a dry run, or when the game stays in Steam', async () => {
+    const t = await synced();
+    await switchOff(t.home);
+    await t.run('sync', '--no-artwork', '--dry-run');
+    expect((await readdir(t.grid)).sort()).toEqual([`${id}_icon.ico`, `${id}p.png`, '999p.png']);
+    await mkdir(path.join(t.home, '.config', 'steam-manager'), { recursive: true });
+    await writeFile(path.join(t.home, '.config', 'steam-manager', 'config.json'), '{}');
+    await t.run('sync', '--no-artwork');
+    expect((await readdir(t.grid)).sort()).toEqual([`${id}_icon.ico`, `${id}p.png`, '999p.png']);
   });
 });
 
