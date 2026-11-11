@@ -14,7 +14,7 @@ afterEach(cleanupTempDirs);
 
 const API = 'https://www.steamgriddb.com/api/v2';
 const artRoutes = {
-  [`${API}/search/autocomplete/Fortnite`]: { json: { success: true, data: [{ id: 1 }] } },
+  [`${API}/search/autocomplete/Fortnite`]: { json: { success: true, data: [{ id: 1, name: 'Fortnite' }] } },
   [`${API}/grids/game/1?dimensions=600x900&types=static`]: { json: { success: true, data: [{ url: 'https://c/p.png' }] } },
   [`${API}/grids/game/1?dimensions=920x430,460x215&types=static`]: { json: { success: true, data: [] } },
   [`${API}/heroes/game/1?types=static`]: { json: { success: true, data: [{ url: 'https://c/h.png' }] } },

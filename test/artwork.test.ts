@@ -12,16 +12,35 @@ const ok = (data: unknown) => ({ json: { success: true, data } });
 
 describe('SteamGridDbClient', () => {
   it('searches games with the bearer token and URL-encoded title', async () => {
-    const fetchFn = fakeFetch({ [`${API}/search/autocomplete/Half%20Life%3A%202`]: ok([{ id: 7 }, { id: 8 }]) });
+    const fetchFn = fakeFetch({ [`${API}/search/autocomplete/Half%20Life%3A%202`]: ok([{ id: 7, name: 'Half Life: 2' }, { id: 8, name: 'Half Life: 2 Mod' }]) });
     const client = new SteamGridDbClient('key', fetchFn);
     expect(await client.searchGame('Half Life: 2')).toBe(7);
     expect(fetchFn.requests[0]?.auth).toBe('Bearer key');
   });
 
-  it('returns undefined when nothing matches', async () => {
-    const client = new SteamGridDbClient('k', fakeFetch({ [`${API}/search/autocomplete/x`]: ok([]) }));
-    expect(await client.searchGame('x')).toBeUndefined();
-    expect(await new SteamGridDbClient('k', fakeFetch({ [`${API}/heroes/game/1?types=static`]: ok([]) })).findArtworkUrl(1, 'hero')).toBeUndefined();
+  it('accepts only the game with exactly this title, whatever its position in the results', async () => {
+    const results = ok([{ id: 1, name: "Hades' Star" }, { id: 2, name: 'HADES™' }, { id: 3, name: 'Hades' }]);
+    expect(await new SteamGridDbClient('k', fakeFetch({ [`${API}/search/autocomplete/Hades`]: results })).searchGame('Hades')).toBe(2);
+    const spider = ok([{ id: 9, name: 'Marvel’s Spider-Man Remastered' }]);
+    expect(await new SteamGridDbClient('k', fakeFetch({ [`${API}/search/autocomplete/Marvel's%20Spider-Man%3A%20Remastered`]: spider })).searchGame("Marvel's Spider-Man: Remastered")).toBe(9);
+  });
+
+  it('treats Roman numerals II to IX like digits, but not I, V or X', async () => {
+    const find = async (query: string, name: string) =>
+      new SteamGridDbClient('k', fakeFetch({ [`${API}/search/autocomplete/${encodeURIComponent(query)}`]: ok([{ id: 1, name }]) })).searchGame(query);
+    expect(await find('Red Dead Redemption 2', 'Red Dead Redemption II')).toBe(1);
+    expect(await find('Doom II', 'Doom 2')).toBe(1);
+    expect(await find('Final Fantasy VII', 'Final Fantasy 7')).toBe(1);
+    expect(await find('Final Fantasy IV', 'FINAL FANTASY 4')).toBe(1);
+    expect(await find('Sid Meier’s Civilization VI', 'Sid Meier\'s Civilization 6')).toBe(1);
+    expect(await find('Mega Man X', 'Mega Man 10')).toBeUndefined();
+    expect(await find('Fallout V', 'Fallout 5')).toBeUndefined();
+    expect(await find('Grand Theft Auto I', 'Grand Theft Auto 1')).toBeUndefined();
+  });
+
+  it('does not take a near miss: the search always returns something, even for games it does not have', async () => {
+    const fuzzy = { [`${API}/search/autocomplete/Some%20Obscure%20Game`]: ok([{ id: 4, name: 'Some Distant Memory' }, { id: 5, name: 'Some Like It Hot' }]) };
+    expect(await new SteamGridDbClient('k', fakeFetch(fuzzy)).searchGame('Some Obscure Game')).toBeUndefined();
   });
 
   it('queries each artwork kind with the right endpoint and dimensions', async () => {

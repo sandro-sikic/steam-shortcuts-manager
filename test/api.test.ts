@@ -385,7 +385,7 @@ describe('api key', () => {
   const withFetch = (routes: Parameters<typeof fakeFetch>[0], extra: Partial<ApiDeps> = {}, env: NodeJS.ProcessEnv = {}) => setup({ env, extra: { fetchFn: fakeFetch(routes), ...extra } });
 
   it('tests a given key against SteamGridDB', async () => {
-    const fetchFn = fakeFetch({ [API]: { json: { success: true, data: [{ id: 1 }] } } });
+    const fetchFn = fakeFetch({ [API]: { json: { success: true, data: [{ id: 1, name: 'Half-Life' }] } } });
     const { api } = await setup({ extra: { fetchFn } });
     expect(await api.testApiKey(' goodkey ')).toEqual({ ok: true, message: 'The key works.' });
     expect(fetchFn.requests[0]?.auth).toBe('Bearer goodkey');
@@ -503,7 +503,7 @@ describe('settings take effect', () => {
 
   it('downloads only the chosen kinds of artwork', async () => {
     const routes = {
-      'https://www.steamgriddb.com/api/v2/search/autocomplete/Fortnite': { json: { success: true, data: [{ id: 1 }] } },
+      'https://www.steamgriddb.com/api/v2/search/autocomplete/Fortnite': { json: { success: true, data: [{ id: 1, name: 'Fortnite' }] } },
       'https://www.steamgriddb.com/api/v2/heroes/game/1?types=static': { json: { success: true, data: [{ url: 'https://c/h.png' }] } },
       'https://c/h.png': { body: Buffer.from('H') },
     };
@@ -540,7 +540,7 @@ describe('parseArtworkRequest', () => {
 describe('api artwork', () => {
   const API = 'https://www.steamgriddb.com/api/v2';
   const routes = {
-    [`${API}/search/autocomplete/Fortnite`]: { json: { success: true, data: [{ id: 1 }] } },
+    [`${API}/search/autocomplete/Fortnite`]: { json: { success: true, data: [{ id: 1, name: 'Fortnite' }] } },
     [`${API}/grids/game/1?dimensions=600x900&types=static`]: { json: { success: true, data: [{ url: 'https://c/p.png' }] } },
     [`${API}/grids/game/1?dimensions=920x430,460x215&types=static`]: { json: { success: true, data: [] } },
     [`${API}/heroes/game/1?types=static`]: { json: { success: true, data: [{ url: 'https://c/h.jpg' }] } },

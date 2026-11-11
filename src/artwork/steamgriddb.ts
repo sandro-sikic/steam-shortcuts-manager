@@ -1,3 +1,4 @@
+import { normalizeTitle } from '../dedupe.js';
 import type { ArtworkKind } from './kinds.js';
 
 export type { ArtworkKind };
@@ -10,6 +11,13 @@ export interface FetchResponse {
   arrayBuffer(): Promise<ArrayBuffer>;
 }
 export type FetchLike = (url: string, init?: { headers?: Record<string, string> }) => Promise<FetchResponse>;
+
+/** "II" and "2" are the same game; "I", "V" and "X" are left alone because they are often part of a name (Mega Man X). */
+const ROMAN: Record<string, string> = { ii: '2', iii: '3', iv: '4', vi: '6', vii: '7', viii: '8', ix: '9' };
+
+function titleKey(title: string): string {
+  return normalizeTitle(title.replace(/\b(?:ii|iii|iv|vi|vii|viii|ix)\b/gi, (numeral) => ROMAN[numeral.toLowerCase()] as string));
+}
 
 const BASE_URL = 'https://www.steamgriddb.com/api/v2';
 
@@ -47,10 +55,15 @@ export class SteamGridDbClient {
     return body.data;
   }
 
-  /** Finds the SteamGridDB game ID best matching a title, if any. */
+  /**
+   * Finds the SteamGridDB game with exactly this title (ignoring case, punctuation, symbols such as ™ and Roman numerals).
+   * Its search is fuzzy and always returns something, so a near miss would show another game's artwork;
+   * no exact match means no artwork.
+   */
   async searchGame(title: string): Promise<number | undefined> {
-    const games = await this.get<{ id: number }[]>(`/search/autocomplete/${encodeURIComponent(title)}`);
-    return games[0]?.id;
+    const games = await this.get<{ id: number; name: string }[]>(`/search/autocomplete/${encodeURIComponent(title)}`);
+    const wanted = titleKey(title);
+    return games.find((game) => titleKey(game.name) === wanted)?.id;
   }
 
   /** Returns the URL of the top-rated image of a given kind for a game, if any. */
