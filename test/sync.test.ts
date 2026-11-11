@@ -79,4 +79,35 @@ describe('planSync', () => {
     expect(result.entries[0]).toBe(first);
     expect(result.entries).toHaveLength(2);
   });
+
+  it('replaces our own shortcut when the same title gets a different launch target', () => {
+    const old = managed(game({ exe: '/old/fortnite' }));
+    const result = planSync([old], [game({ exe: '/new/fortnite' })], { prune: false });
+    expect(result.removed.map((r) => [r.title, r.store])).toEqual([['Fortnite', 'Epic Games']]);
+    expect(result.added).toHaveLength(1);
+    expect(result.entries).toHaveLength(1);
+    expect(getField(result.entries[0]!, 'Exe')).toBe('"/new/fortnite"');
+  });
+
+  it('keeps our old shortcut when its own game is still provided', () => {
+    const old = managed(game({ exe: '/old/fortnite' }));
+    const result = planSync([old], [game({ exe: '/old/fortnite' }), game({ exe: '/other/fortnite' })], { prune: false });
+    expect(result.removed).toHaveLength(0);
+    expect(result.entries).toHaveLength(2);
+  });
+
+  it('replaces a stale shortcut only once when several new games share its title', () => {
+    const old = managed(game({ exe: '/old/fortnite' }));
+    const result = planSync([old], [game({ exe: '/a/fortnite' }), game({ exe: '/b/fortnite' })], { prune: false });
+    expect(result.removed).toHaveLength(1);
+    expect(result.added).toHaveLength(2);
+    expect(result.entries).toHaveLength(2);
+  });
+
+  it('never replaces shortcuts it does not manage', () => {
+    const foreign = buildShortcut({ title: 'Fortnite', exe: '/mine/fortnite', tags: [] });
+    const result = planSync([foreign], [game({ exe: '/new/fortnite' })], { prune: false });
+    expect(result.removed).toHaveLength(0);
+    expect(result.entries).toHaveLength(2);
+  });
 });

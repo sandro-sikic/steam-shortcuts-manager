@@ -9,6 +9,8 @@ export interface LocateOptions {
 }
 
 export interface SteamUser {
+  /** The Steam installation directory. */
+  root: string;
   /** The 32-bit account ID, which is the name of the `userdata` sub-directory. */
   accountId: string;
   configDir: string;
@@ -90,5 +92,5 @@ export async function resolveUser(root: string, requested?: string): Promise<Ste
     }
   }
   const configDir = path.join(root, 'userdata', accountId, 'config');
-  return { accountId, configDir, gridDir: path.join(configDir, 'grid') };
+  return { root, accountId, configDir, gridDir: path.join(configDir, 'grid') };
 }

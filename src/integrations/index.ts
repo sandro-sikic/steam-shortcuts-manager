@@ -6,6 +6,7 @@ import { gogIntegration } from './gog.js';
 import { heroicIntegration } from './heroic.js';
 import { itchIntegration } from './itch.js';
 import { minecraftIntegration } from './minecraft.js';
+import { osIntegration } from './os/index.js';
 import { riotIntegration } from './riot.js';
 import { rockstarIntegration } from './rockstar.js';
 import { ubisoftIntegration } from './ubisoft.js';
@@ -26,6 +27,8 @@ export const integrations: Integration[] = [
   rockstarIntegration,
   ubisoftIntegration,
   xboxIntegration,
+  // Last: its guesses must lose against the specific launchers when de-duplicating.
+  osIntegration,
 ];
 
 /** The integrations that make sense on a platform. */
@@ -33,7 +36,7 @@ export function availableIntegrations(platform: NodeJS.Platform, all: Integratio
   return all.filter((integration) => integration.platforms.includes(platform));
 }
 
-/** Resolves a `--only` selection; throws on ids that are unknown or unavailable on this platform. */
+/** Resolves a `--only` selection (returned in registry order); throws on ids that are unknown or unavailable on this platform. */
 export function selectIntegrations(
   platform: NodeJS.Platform,
   only: string[] | undefined,
@@ -41,11 +44,11 @@ export function selectIntegrations(
 ): Integration[] {
   const available = availableIntegrations(platform, all);
   if (only === undefined) return available;
-  return only.map((id) => {
-    const found = available.find((integration) => integration.id === id);
-    if (found === undefined) {
+  for (const id of only) {
+    if (!available.some((integration) => integration.id === id)) {
       throw new Error(`Unknown or unavailable integration "${id}". Available here: ${available.map((i) => i.id).join(', ') || 'none'}`);
     }
-    return found;
-  });
+  }
+  // Keep registry order whatever order --only lists them in: it decides which duplicate wins.
+  return available.filter((integration) => only.includes(integration.id));
 }

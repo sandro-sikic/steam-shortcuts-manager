@@ -12,9 +12,10 @@ describe('integration registry', () => {
     expect(availableIntegrations('darwin', all)).toEqual([]);
   });
 
-  it('selects everything available, or the requested ids in order', () => {
+  it('selects everything available, or the requested ids in registry order', () => {
     expect(selectIntegrations('win32', undefined, all).map((i) => i.id)).toEqual(['both', 'win']);
-    expect(selectIntegrations('win32', ['win', 'both'], all).map((i) => i.id)).toEqual(['win', 'both']);
+    // registry order, whatever order --only lists them in
+    expect(selectIntegrations('win32', ['win', 'both'], all).map((i) => i.id)).toEqual(['both', 'win']);
   });
 
   it('rejects unknown or unavailable ids', () => {
@@ -24,7 +25,7 @@ describe('integration registry', () => {
 
   it('registers every launcher with unique ids, labels and the platforms we support', () => {
     expect(integrations.map((i) => i.id).sort()).toEqual([
-      'amazon', 'battlenet', 'ea', 'epic', 'gog', 'heroic', 'itch', 'minecraft', 'riot', 'rockstar', 'ubisoft', 'xbox',
+      'amazon', 'battlenet', 'ea', 'epic', 'gog', 'heroic', 'itch', 'minecraft', 'os', 'riot', 'rockstar', 'ubisoft', 'xbox',
     ]);
     expect(new Set(integrations.map((i) => i.label)).size).toBe(integrations.length);
     for (const integration of integrations) {
@@ -36,10 +37,14 @@ describe('integration registry', () => {
 
   it('offers the expected launchers per platform', () => {
     const ids = (platform: NodeJS.Platform) => availableIntegrations(platform).map((i) => i.id).sort();
-    expect(ids('linux')).toEqual(['heroic', 'itch', 'minecraft']);
+    expect(ids('linux')).toEqual(['heroic', 'itch', 'minecraft', 'os']);
     expect(ids('darwin')).toEqual(['epic', 'heroic', 'itch']);
     expect(ids('win32')).toEqual([
-      'amazon', 'battlenet', 'ea', 'epic', 'gog', 'heroic', 'itch', 'minecraft', 'riot', 'rockstar', 'ubisoft', 'xbox',
+      'amazon', 'battlenet', 'ea', 'epic', 'gog', 'heroic', 'itch', 'minecraft', 'os', 'riot', 'rockstar', 'ubisoft', 'xbox',
     ]);
+  });
+
+  it('keeps the installed-apps scan last so specific launchers win de-duplication', () => {
+    expect(integrations.at(-1)?.id).toBe('os');
   });
 });

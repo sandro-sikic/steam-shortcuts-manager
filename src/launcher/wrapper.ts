@@ -1,5 +1,6 @@
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { configDir } from '../config.js';
 import type { Game, UriLaunch } from '../types.js';
 
 /** What the Steam shortcut should run. */
@@ -11,15 +12,10 @@ export interface ShortcutTarget {
 
 const MAX_WAIT_SECONDS = 120;
 
-/** Where wrapper scripts are kept: `<config home>/steam-manager/launchers`. */
+/** Where wrapper scripts are kept: `<config dir>/launchers`. */
 export function wrapperDir(platform: NodeJS.Platform, home: string, env: NodeJS.ProcessEnv): string {
-  if (platform === 'win32') {
-    return path.win32.join(env['APPDATA'] || path.win32.join(home, 'AppData', 'Roaming'), 'steam-manager', 'launchers');
-  }
-  if (platform === 'darwin') {
-    return path.posix.join(home, 'Library', 'Application Support', 'steam-manager', 'launchers');
-  }
-  return path.posix.join(env['XDG_CONFIG_HOME'] || path.posix.join(home, '.config'), 'steam-manager', 'launchers');
+  const join = platform === 'win32' ? path.win32.join : path.posix.join;
+  return join(configDir(platform, home, env), 'launchers');
 }
 
 function fileName(game: Game, platform: NodeJS.Platform): string {

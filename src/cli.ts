@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import {
   runAdd,
+  runApps,
   runIntegrations,
   runList,
   runSync,
@@ -34,9 +35,18 @@ export function createProgram(ctx: AppContext): Command {
     });
 
   program
+    .command('apps')
+    .description('show which installed apps look like games, and why')
+    .option('--all', 'also show apps judged not to be games')
+    .action(async (_options, command: Command) => {
+      await runApps(ctx, command.optsWithGlobals<{ all?: boolean }>());
+    });
+
+  program
     .command('sync')
     .description('sync installed games from the launcher integrations into Steam')
     .option('--only <ids>', 'comma-separated integration ids to sync (see "integrations")', (value) => value.split(','))
+    .option('--include-maybe', 'also add installed apps that only weakly look like games (e.g. Unity/Unreal installs)')
     .option('--prune', 'remove managed shortcuts for games that are no longer installed')
     .option('--dry-run', 'show what would change without writing anything')
     .option('--no-artwork', 'do not download artwork')

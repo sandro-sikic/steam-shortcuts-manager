@@ -1,8 +1,9 @@
-import { mkdir, readdir, readFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../src/app.js';
 import { createProgram } from '../src/cli.js';
+import { osIntegration } from '../src/integrations/os/index.js';
 import { buildShortcut, computeAppId, MANAGED_TAG } from '../src/steam/shortcuts.js';
 import { loadShortcuts, saveShortcuts } from '../src/steam/store.js';
 import type { Integration } from '../src/integrations/types.js';
@@ -246,8 +247,8 @@ describe('sync', () => {
     await saveShortcuts(configDir, [buildShortcut({ title: 'Fortnite', exe: '/games/fortnite', tags: [] })]);
     await run('sync');
     expect(logs).toEqual([
-      'Skipped (conflicts with a shortcut we do not manage, or duplicate):',
-      '  Fortnite [Epic Games]',
+      'Skipped duplicates:',
+      '  Fortnite [Epic Games], same as Fortnite (your own shortcut)',
       '0 added, 0 updated, 0 removed, 0 unchanged',
     ]);
   });
@@ -263,5 +264,124 @@ describe('sync', () => {
     const { run, logs } = await setup({ integrations: [integration([fortnite])], env: { STEAMGRIDDB_API_KEY: 'k' } });
     await run('sync');
     expect(logs.at(-1)).toBe('  Fortnite (artwork: 2 saved, 0 already present, 3 not found, 0 failed)');
+  });
+});
+
+/** A fake Linux desktop with a few .desktop files, wired into env so the OS scan sees only them. */
+async function desktopEnv(entries: Record<string, string>): Promise<NodeJS.ProcessEnv> {
+  const data = await makeTempDir();
+  const bin = await makeTempDir();
+  await mkdir(path.join(data, 'applications'));
+  for (const [name, categories] of Object.entries(entries)) {
+    const exe = path.join(bin, name.replace(/\W/g, ''));
+    await writeFile(exe, '#!/bin/sh\n');
+    await chmod(exe, 0o755);
+    const body = `[Desktop Entry]\nType=Application\nName=${name}\nExec=${exe}\nCategories=${categories}\n`;
+    await writeFile(path.join(data, 'applications', `${name.replace(/\W/g, '')}.desktop`), body);
+  }
+  return { XDG_DATA_HOME: data, XDG_DATA_DIRS: data, PATH: bin };
+}
+
+describe.skipIf(process.platform === 'win32')('installed apps', () => {
+  const apps = { 'Alpha Game': 'Game;', 'Beta Game': 'Game;', 'Some Tool': 'Utility;' };
+
+  it('apps lists the games found and, with --all, the rest with reasons', async () => {
+    const { run, logs } = await setup({ env: await desktopEnv(apps) });
+    await run('apps');
+    expect(logs).toEqual(['game   Alpha Game  (freedesktop-game)', 'game   Beta Game  (freedesktop-game)']);
+    logs.length = 0;
+    await run('apps', '--all');
+    expect(logs).toContain('no     Some Tool  (categorized as Utility)');
+  });
+
+  it('apps says so when nothing looks like a game', async () => {
+    const { run, logs } = await setup({ env: await desktopEnv({ 'Some Tool': 'Utility;' }) });
+    await run('apps');
+    expect(logs).toEqual(['No games found among the installed apps.']);
+  });
+
+  it('sync adds confident games under the Installed Apps tag', async () => {
+    const { run, configDir, logs } = await setup({ env: await desktopEnv(apps), integrations: [osIntegration] });
+    await run('sync', '--no-artwork');
+    const entries = await loadShortcuts(configDir);
+    expect(entries.map((e) => e.get('AppName'))).toEqual(['Alpha Game', 'Beta Game']);
+    expect(entries[0]?.get('tags')).toEqual(new Map([['0', 'Installed Apps'], ['1', MANAGED_TAG]]));
+    expect(logs).toContain('2 added, 0 updated, 0 removed, 0 unchanged');
+  });
+
+  it('never adds a game twice: the specific launcher wins over the OS guess', async () => {
+    const alpha: Game = { store: 'Epic Games', id: 'a', title: 'Alpha Game', installed: true, launch: { kind: 'exe', exe: '/epic/alpha' } };
+    const { run, configDir, logs } = await setup({ env: await desktopEnv(apps), integrations: [integration([alpha]), osIntegration] });
+    await run('sync', '--no-artwork');
+    expect((await loadShortcuts(configDir)).map((e) => e.get('AppName'))).toEqual(['Alpha Game', 'Beta Game']);
+    expect(logs).toContain('Skipped duplicates:');
+    expect(logs).toContain('  Alpha Game [Installed Apps], same as Alpha Game [Epic Games]');
+  });
+
+  it('skips games that are already installed in Steam itself', async () => {
+    const { run, root, configDir, logs } = await setup({ env: await desktopEnv(apps), integrations: [osIntegration] });
+    await mkdir(path.join(root, 'steamapps'), { recursive: true });
+    await writeFile(path.join(root, 'steamapps', 'appmanifest_1.acf'), '"AppState" { "name" "Beta Game" }');
+    await run('sync', '--no-artwork');
+    expect((await loadShortcuts(configDir)).map((e) => e.get('AppName'))).toEqual(['Alpha Game']);
+    expect(logs).toContain('  Beta Game [Installed Apps], same as Beta Game (installed in Steam)');
+  });
+
+  it('tolerates hand-made shortcuts that lack an exe or launch options', async () => {
+    const { run, configDir } = await setup({ env: await desktopEnv(apps), integrations: [osIntegration] });
+    await saveShortcuts(configDir, [
+      new Map<string, string | number>([['appid', 1], ['AppName', 'No Exe']]),
+      new Map<string, string | number>([['appid', 2], ['AppName', 'No Options'], ['Exe', '"/somewhere/else"']]),
+    ]);
+    await run('sync', '--no-artwork');
+    expect((await loadShortcuts(configDir)).map((e) => e.get('AppName'))).toEqual(['No Exe', 'No Options', 'Alpha Game', 'Beta Game']);
+  });
+
+  it('is idempotent across runs', async () => {
+    const { run, configDir, logs } = await setup({ env: await desktopEnv(apps), integrations: [osIntegration] });
+    await run('sync', '--no-artwork');
+    logs.length = 0;
+    await run('sync', '--no-artwork');
+    expect(logs).toEqual(['0 added, 0 updated, 0 removed, 2 unchanged']);
+    expect(await loadShortcuts(configDir)).toHaveLength(2);
+  });
+
+  it('applies allow and deny lists from config.json', async () => {
+    const { run, home, configDir } = await setup({ env: await desktopEnv(apps), integrations: [osIntegration] });
+    const dir = path.join(home, '.config', 'steam-manager');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'config.json'), JSON.stringify({ allow: ['Some Tool'], deny: ['Alpha Game'] }));
+    await run('sync', '--no-artwork');
+    expect((await loadShortcuts(configDir)).map((e) => e.get('AppName'))).toEqual(['Beta Game', 'Some Tool']);
+  });
+
+  it('reports an invalid config file', async () => {
+    const { run, home } = await setup({ env: await desktopEnv(apps), integrations: [osIntegration] });
+    const dir = path.join(home, '.config', 'steam-manager');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'config.json'), '{broken');
+    await expect(run('sync')).rejects.toThrow('Invalid config file');
+    await expect(run('apps')).rejects.toThrow('Invalid config file');
+  });
+});
+
+describe('weak guesses on Windows', () => {
+  it('sync adds Unity/Unreal installs only with --include-maybe', async () => {
+    const dir = await makeTempDir();
+    const game = path.join(dir, 'Unity G');
+    await mkdir(path.join(game, 'G_Data'), { recursive: true });
+    await writeFile(path.join(game, 'UnityPlayer.dll'), '');
+    await writeFile(path.join(game, 'G.exe'), '');
+    const reg = `\r\nHKEY_CURRENT_USER\\x\\G\r\n    DisplayName    REG_SZ    Unity G\r\n    InstallLocation    REG_SZ    ${game}\r\n`;
+    const base = await setup({ platform: 'win32', integrations: [osIntegration] });
+    base.ctx.runner = async (command, args) => (command === 'reg' && args[1]?.startsWith('HKCU\\SOFTWARE') ? reg : '');
+
+    await base.run('apps');
+    expect(base.logs).toEqual(['maybe  Unity G  (unity)']);
+    await base.run('sync', '--no-artwork');
+    expect(await loadShortcuts(base.configDir)).toEqual([]);
+
+    await base.run('sync', '--no-artwork', '--include-maybe');
+    expect((await loadShortcuts(base.configDir)).map((e) => e.get('AppName'))).toEqual(['Unity G']);
   });
 });

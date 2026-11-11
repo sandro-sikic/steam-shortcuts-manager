@@ -4,7 +4,7 @@ CLI that adds games from other launchers (Epic, GOG, Ubisoft, ...) to Steam as n
 tagged with their store (shown as a collection in Big Picture) and with SteamGridDB artwork
 (poster, wide capsule, hero, logo, icon), so every game can be launched from Steam.
 
-Status: the core pipeline and 12 launcher integrations are implemented. The integrations read local
+Status: the core pipeline, 12 launcher integrations and an installed-apps scan are implemented. The integrations read local
 files only (no logins, no network) and were written from knowledge of each launcher's on-disk format.
 **None has been verified on a real machine yet** (see below).
 
@@ -19,6 +19,8 @@ steam-manager list
 steam-manager integrations            # launchers available on this OS
 steam-manager sync --dry-run          # preview what would be added
 steam-manager sync --only epic,gog    # limit to some launchers
+steam-manager apps                    # which installed apps look like games, and why
+steam-manager sync --include-maybe    # also add weak guesses (Unity/Unreal installs)
 ```
 
 Global options: `--steam-dir`, `--user`, `--api-key`, `--allow-steam-running`.
@@ -49,8 +51,31 @@ for the game process, so Steam keeps showing the game as running.
 ### Not verified on real machines
 The tests use fixture files and fake registry output. Each integration file starts with an
 `// Unverified:` note listing its assumptions. Least certain: EA app (registry layout), Battle.net
-(game names and process names), Xbox (`shell:AppsFolder` launch), Heroic (`heroic://launch/...` URI),
+(game names and process names), the Windows Game Bar and Unity/Unreal detection, Xbox (`shell:AppsFolder` launch), Heroic (`heroic://launch/...` URI),
 and the Windows `.cmd` wrapper itself. Run `steam-manager sync --dry-run` on each platform first.
+
+## Installed apps (OS scan)
+
+The `os` integration ("Installed Apps" tag) scans the operating system's installed applications for games
+that no launcher integration covers. It is **strict**: only apps the OS or you marked as games are added.
+
+- **Linux:** `.desktop` files with the freedesktop `Game` category, minus emulators, utilities, launchers and Steam's own entries.
+- **Windows:** games Game Bar recognizes (`MatchedExeFullPath`). Unity/Unreal installs are only "maybe" and need `--include-maybe`.
+- `steam-manager apps [--all]` shows the verdict and reason per app. Override it in
+  `<config>/steam-manager/config.json` (`~/.config/...` on Linux, `%APPDATA%` on Windows):
+  `{ "allow": ["Some Game"], "deny": ["Some Tool"] }` (matched by title or id).
+
+## Duplicates
+
+A game is never added twice. Skipped duplicates are listed with what they duplicate (first match wins; the
+OS scan always loses against a specific launcher):
+1. within one run, the same launch target (exe plus arguments, or URI) or the same normalized title;
+2. a shortcut you added yourself (same exe or title);
+3. a game installed through Steam itself (matched by title from its `appmanifest` files);
+4. one of our own shortcuts for that title with a different launch target is replaced, not duplicated.
+
+Titles are compared ignoring case, punctuation, accents and symbols like ™. `add` bypasses checks 1 to 3, since
+you asked for that game explicitly.
 
 ## Layout
 

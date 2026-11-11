@@ -62,6 +62,7 @@ describe('resolveUser', () => {
     const root = await makeSteamRoot(['1', '2']);
     const user = await resolveUser(root, '2');
     expect(user).toEqual({
+      root,
       accountId: '2',
       configDir: path.join(root, 'userdata', '2', 'config'),
       gridDir: path.join(root, 'userdata', '2', 'config', 'grid'),
