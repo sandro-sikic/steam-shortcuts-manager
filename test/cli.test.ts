@@ -8,7 +8,7 @@ import { buildShortcut, computeAppId, MANAGED_TAG } from '../src/steam/shortcuts
 import { loadShortcuts, saveShortcuts } from '../src/steam/store.js';
 import type { Integration } from '../src/integrations/types.js';
 import type { Game } from '../src/types.js';
-import { cleanupTempDirs, fakeFetch, makeSteamRoot, makeTempDir } from './helpers.js';
+import { cleanupTempDirs, desktopEnv, fakeFetch, makeSteamRoot, makeTempDir } from './helpers.js';
 
 afterEach(cleanupTempDirs);
 
@@ -266,21 +266,6 @@ describe('sync', () => {
     expect(logs.at(-1)).toBe('  Fortnite (artwork: 2 saved, 0 already present, 3 not found, 0 failed)');
   });
 });
-
-/** A fake Linux desktop with a few .desktop files, wired into env so the OS scan sees only them. */
-async function desktopEnv(entries: Record<string, string>): Promise<NodeJS.ProcessEnv> {
-  const data = await makeTempDir();
-  const bin = await makeTempDir();
-  await mkdir(path.join(data, 'applications'));
-  for (const [name, categories] of Object.entries(entries)) {
-    const exe = path.join(bin, name.replace(/\W/g, ''));
-    await writeFile(exe, '#!/bin/sh\n');
-    await chmod(exe, 0o755);
-    const body = `[Desktop Entry]\nType=Application\nName=${name}\nExec=${exe}\nCategories=${categories}\n`;
-    await writeFile(path.join(data, 'applications', `${name.replace(/\W/g, '')}.desktop`), body);
-  }
-  return { XDG_DATA_HOME: data, XDG_DATA_DIRS: data, PATH: bin };
-}
 
 describe.skipIf(process.platform === 'win32')('installed apps', () => {
   const apps = { 'Alpha Game': 'Game;', 'Beta Game': 'Game;', 'Some Tool': 'Utility;' };

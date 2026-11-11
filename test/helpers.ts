@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { FetchLike, FetchResponse } from '../src/artwork/steamgriddb.js';
@@ -69,3 +69,19 @@ export function fakeFetch(routes: Record<string, FakeResponse>): FetchLike & { r
   fn.requests = requests;
   return fn;
 }
+
+/** A fake Linux desktop with a few .desktop files, wired into env so the OS scan sees only them. */
+export async function desktopEnv(entries: Record<string, string>): Promise<NodeJS.ProcessEnv> {
+  const data = await makeTempDir();
+  const bin = await makeTempDir();
+  await mkdir(path.join(data, 'applications'));
+  for (const [name, categories] of Object.entries(entries)) {
+    const exe = path.join(bin, name.replace(/\W/g, ''));
+    await writeFile(exe, '#!/bin/sh\n');
+    await chmod(exe, 0o755);
+    const body = `[Desktop Entry]\nType=Application\nName=${name}\nExec=${exe}\nCategories=${categories}\n`;
+    await writeFile(path.join(data, 'applications', `${name.replace(/\W/g, '')}.desktop`), body);
+  }
+  return { XDG_DATA_HOME: data, XDG_DATA_DIRS: data, PATH: bin };
+}
+

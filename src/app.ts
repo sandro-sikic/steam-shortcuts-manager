@@ -3,6 +3,7 @@ import { SteamGridDbClient, type FetchLike } from './artwork/steamgriddb.js';
 import { configDir, loadConfig } from './config.js';
 import { dedupeGames, exeKey, normalizeTitle, type Duplicate, type KnownGames } from './dedupe.js';
 import { selectIntegrations, availableIntegrations } from './integrations/index.js';
+import type { Classification } from './integrations/os/classify.js';
 import { classifyInstalledApps } from './integrations/os/index.js';
 import type { Integration } from './integrations/types.js';
 import { resolveTarget, wrapperDir } from './launcher/wrapper.js';
@@ -52,7 +53,7 @@ export interface AddCommandOptions extends SyncCommandOptions {
   launchOptions?: string;
 }
 
-async function openUser(ctx: AppContext, options: GlobalOptions): Promise<SteamUser> {
+export async function openUser(ctx: AppContext, options: GlobalOptions): Promise<SteamUser> {
   const root = options.steamDir ?? (await findSteamRoot(ctx));
   return resolveUser(root, options.user);
 }
@@ -167,11 +168,11 @@ async function applyGames(
   return result;
 }
 
-export async function runSync(ctx: AppContext, options: GlobalOptions & SyncCommandOptions): Promise<void> {
+export async function runSync(ctx: AppContext, options: GlobalOptions & SyncCommandOptions): Promise<SyncResult | undefined> {
   const selected = selectIntegrations(ctx.platform, options.only, ctx.integrations);
   if (selected.length === 0) {
     ctx.log('No integrations are available on this platform, so there is nothing to sync. Use "add" to add a game by hand.');
-    return;
+    return undefined;
   }
   const config = await loadConfig(configDir(ctx.platform, ctx.home, ctx.env));
   const scanContext = {
@@ -189,7 +190,7 @@ export async function runSync(ctx: AppContext, options: GlobalOptions & SyncComm
       ctx.log(`Could not scan ${integration.label}: ${(error as Error).message}`);
     }
   }
-  await applyGames(ctx, games, options, true);
+  return applyGames(ctx, games, options, true);
 }
 
 export async function runIntegrations(ctx: AppContext): Promise<void> {
@@ -215,8 +216,8 @@ export async function runAdd(ctx: AppContext, options: GlobalOptions & AddComman
   }
 }
 
-/** Shows what the installed-apps scan found and why each app was or was not judged a game. */
-export async function runApps(ctx: AppContext, options: { all?: boolean }): Promise<void> {
+/** Scans the installed apps and classifies them, honoring the user's config; `all` includes the rejected ones. */
+export async function scanApps(ctx: AppContext, all: boolean): Promise<Classification[]> {
   const config = await loadConfig(configDir(ctx.platform, ctx.home, ctx.env));
   const scanContext = {
     platform: ctx.platform,
@@ -225,7 +226,12 @@ export async function runApps(ctx: AppContext, options: { all?: boolean }): Prom
     run: ctx.runner,
     options: { allow: config.allow, deny: config.deny },
   };
-  const shown = (await classifyInstalledApps(scanContext)).filter((c) => options.all || c.verdict !== 'no');
+  return (await classifyInstalledApps(scanContext)).filter((c) => all || c.verdict !== 'no');
+}
+
+/** Shows what the installed-apps scan found and why each app was or was not judged a game. */
+export async function runApps(ctx: AppContext, options: { all?: boolean }): Promise<void> {
+  const shown = await scanApps(ctx, Boolean(options.all));
   if (shown.length === 0) {
     ctx.log('No games found among the installed apps.');
     return;
