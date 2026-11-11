@@ -23,7 +23,7 @@ npm run start    # production build, then launch Electron
   top of the same code the CLI uses, returning data instead of printing. To add a feature: add the method to
   `SteamManagerApi` and `CHANNELS`, implement it in `api.ts`, repeat the channel in the preload, and call it from the UI.
 - The UI defaults to a dry run. Syncing writes only while Steam is closed.
-- Not done yet: packaging (electron-builder), a settings screen for the SteamGridDB key (set `STEAMGRIDDB_API_KEY` for now),
+- Not done yet: code signing and an app icon (packages use the default Electron icon),
   and the `apps`/`add` screens (the `apps` call exists in the API).
 
 ## Usage
@@ -190,3 +190,13 @@ you asked for that game explicitly.
 
 `npm test`, `npm run coverage` (100% threshold, UI included; `electron/main.ts`, the preload and `src/UI/main.tsx` are thin
 bootstrap code verified by launching the app), `npm run typecheck`.
+
+## Packaging and releases
+
+- `npm run pack` builds an unpacked app in `release/`; `npm run dist:linux` makes an AppImage and a deb,
+  `npm run dist:win` an installer and a portable `.exe`, and `npm run dist` both. Nothing is published by these scripts.
+  Building the Windows packages on Linux needs Wine, so build them on Windows or let CI do it. The deb needs a project
+  homepage: set `homepage` in `package.json` (CI sets it to the repository).
+- `.github/workflows/release.yml` runs on every push to `main`: typecheck and tests with 100% coverage, then the Linux and
+  Windows packages on their own runners, then a GitHub release named `v<version>-build.<run number>` with the files attached.
+  The apps are not code-signed, so Windows SmartScreen may warn on first run.
