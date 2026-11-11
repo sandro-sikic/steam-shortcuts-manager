@@ -1,4 +1,6 @@
-import type { ApiKeyStatus, AppInfo, GameInfo, GamesReport, Lists, ShortcutInfo, SteamManagerApi, SyncItemInfo, SyncReport, SyncRequest } from '../ipc.js';
+import { ARTWORK_KINDS } from '../artwork/kinds.js';
+import { coverHue, initials } from './cover.js';
+import type { ApiKeyStatus, AppInfo, ArtworkItem, ArtworkKind, GameInfo, GamesReport, Lists, ShortcutInfo, SteamManagerApi, SyncItemInfo, SyncReport, SyncRequest } from '../ipc.js';
 import { applySettings, DEFAULT_SETTINGS } from '../settingsModel.js';
 
 interface DemoGame {
@@ -21,6 +23,21 @@ const DEMO_GAMES: DemoGame[] = [
 
 const keyOf = (game: DemoGame): string => `${game.store}:${game.id}`;
 
+const IMAGE_SIZE: Record<ArtworkKind, [number, number]> = { poster: [600, 900], wide: [920, 430], hero: [1920, 620], logo: [800, 310], icon: [256, 256] };
+
+/** A generated stand-in for a SteamGridDB image: coloured by the title, labelled with it. */
+function demoImage(kind: ArtworkKind, title: string): string {
+  const [width, height] = IMAGE_SIZE[kind];
+  const hue = coverHue(title);
+  const label = (kind === 'icon' ? initials(title) : title).replace(/[<>&]/g, '');
+  const background = kind === 'logo' ? '' : `<rect width='${width}' height='${height}' fill='url(#g)'/>`;
+  const svg =
+    `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${width} ${height}'>` +
+    `<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='hsl(${hue} 60% 45%)'/><stop offset='1' stop-color='hsl(${hue + 40} 55% 20%)'/></linearGradient></defs>` +
+    `${background}<text x='50%' y='54%' text-anchor='middle' font-family='sans-serif' font-weight='700' font-size='${Math.round(Math.min(width, height) / 5)}' fill='white'>${label}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
 /**
  * A stand-in for the Electron bridge with in-memory example data, so the UI can be developed in a
  * plain browser (`npm run ui:dev`). It is installed only when the real bridge is missing.
@@ -28,6 +45,13 @@ const keyOf = (game: DemoGame): string => `${game.store}:${game.id}`;
 export function createDemoBridge(): SteamManagerApi {
   const appIdOf = (game: DemoGame): number => 1000 + DEMO_GAMES.indexOf(game);
   const excluded = new Set<string>();
+  /** Images "downloaded" per shortcut ID. */
+  const art = new Map<number, { title: string; kinds: Set<ArtworkKind> }>([
+    [appIdOf(DEMO_GAMES[0] as DemoGame), { title: 'Fortnite', kinds: new Set(ARTWORK_KINDS) }],
+    [appIdOf(DEMO_GAMES[2] as DemoGame), { title: 'Hades', kinds: new Set<ArtworkKind>(['poster', 'hero']) }],
+  ]);
+  const itemsOf = (entry: { title: string; kinds: Set<ArtworkKind> }): ArtworkItem[] =>
+    ARTWORK_KINDS.filter((kind) => entry.kinds.has(kind)).map((kind) => ({ kind, url: demoImage(kind, entry.title) }));
   let settings = structuredClone(DEFAULT_SETTINGS);
   let allow: string[] = [];
   let deny: string[] = ['Some Tool'];
@@ -104,6 +128,15 @@ export function createDemoBridge(): SteamManagerApi {
     ],
     about: async () => ({ version: 'demo', platform: 'demo', configFile: '/demo/steam-manager/config.json', steamRoot: '/demo/Steam', secureStorage: true }),
     openConfigFolder: async () => undefined,
+    artwork: async (appIds) => Object.fromEntries(appIds.flatMap((appId) => (art.has(appId) ? [[appId, itemsOf(art.get(appId) as { title: string; kinds: Set<ArtworkKind> })]] : []))),
+    downloadArtwork: async ({ appId, title, force }) => {
+      if (apiKey === '') throw new Error('Add a SteamGridDB API key in Settings to download artwork.');
+      const entry = art.get(appId) ?? { title, kinds: new Set<ArtworkKind>() };
+      const outcomes = ARTWORK_KINDS.map((kind) => ({ kind, status: entry.kinds.has(kind) && !force ? ('exists' as const) : ('saved' as const) }));
+      for (const kind of ARTWORK_KINDS) entry.kinds.add(kind);
+      art.set(appId, entry);
+      return { outcomes, items: itemsOf(entry) };
+    },
     sync: async (request: SyncRequest): Promise<SyncReport> => {
       const games = listed(request.includeMaybe);
       const item = (game: DemoGame): SyncItemInfo => ({ appId: appIdOf(game), title: game.title, store: game.store });

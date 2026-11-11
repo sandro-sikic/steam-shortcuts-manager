@@ -8,7 +8,7 @@ const contentSecurityPolicy: Plugin = {
   transformIndexHtml: (html) =>
     html.replace(
       '</head>',
-      `  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:" />\n  </head>`,
+      `  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: steam-manager-art:" />\n  </head>`,
     ),
 };
 

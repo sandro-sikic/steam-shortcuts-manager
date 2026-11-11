@@ -1,7 +1,8 @@
-import { app, BrowserWindow, ipcMain, safeStorage, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, protocol, safeStorage, shell } from 'electron';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createApi, systemDeps } from '../src/api.js';
+import { createApi, createArtworkServer, systemDeps, type ApiDeps } from '../src/api.js';
+import { ARTWORK_SCHEME } from '../src/artwork/files.js';
 import { configDir } from '../src/config.js';
 import { registerIpc } from '../src/ipc.js';
 import { createSecretStore, type Encryptor } from '../src/secrets.js';
@@ -21,6 +22,9 @@ const encryptor: Encryptor = {
   encrypt: (plain) => safeStorage.encryptStringAsync(plain),
   decrypt: async (data) => (await safeStorage.decryptStringAsync(data)).result,
 };
+
+// Grid images are served from our own scheme (registered before the app is ready).
+protocol.registerSchemesAsPrivileged([{ scheme: ARTWORK_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } }]);
 
 function isAppUrl(url: string): boolean {
   return dev ? url.startsWith(DEV_URL) : url.startsWith('file://');
@@ -55,19 +59,24 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
-  const deps = systemDeps();
-  registerIpc(
-    ipcMain,
-    createApi({
-      ...deps,
-      secrets: createSecretStore(configDir(deps.platform, deps.home, deps.env), encryptor),
-      version: app.getVersion(),
-      openPath: async (folder) => {
-        const error = await shell.openPath(folder);
-        if (error) throw new Error(error);
-      },
-    }),
-  );
+  const deps: ApiDeps = {
+    ...systemDeps(),
+    version: app.getVersion(),
+    openPath: async (folder) => {
+      const error = await shell.openPath(folder);
+      if (error) throw new Error(error);
+    },
+  };
+  deps.secrets = createSecretStore(configDir(deps.platform, deps.home, deps.env), encryptor);
+  registerIpc(ipcMain, createApi(deps));
+
+  const serveArtwork = createArtworkServer(deps);
+  protocol.handle(ARTWORK_SCHEME, async (request) => {
+    const result = await serveArtwork(request.url);
+    return result.status === 200
+      ? new Response(new Uint8Array(result.data), { headers: { 'content-type': result.contentType, 'cache-control': 'no-cache' } })
+      : new Response(null, { status: result.status });
+  });
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

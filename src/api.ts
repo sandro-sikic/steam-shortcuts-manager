@@ -1,13 +1,16 @@
 import os from 'node:os';
 import { configDir, configFile, loadConfig, updateConfig } from './config.js';
 import { mkdir } from 'node:fs/promises';
+import { ARTWORK_KINDS } from './artwork/kinds.js';
+import { artworkUrl, ARTWORK_SCHEME, listArtwork, readArtworkFile, type ArtworkResponse } from './artwork/files.js';
+import { installArtwork } from './artwork/install.js';
 import { SteamGridDbClient } from './artwork/steamgriddb.js';
 import { loadSettings, resetSettings, updateSettings } from './settings.js';
 import { SECURE_STORAGE_UNAVAILABLE, type SecretStore } from './secrets.js';
 import { openUser, resolveGames, runSync, scanApps, scanIntegrations, knownGames, type AppContext } from './app.js';
 import { dedupeGames, gameKey, type KnownGames } from './dedupe.js';
 import { availableIntegrations, integrations } from './integrations/index.js';
-import type { AboutInfo, ApiKeyStatus, ApiKeyTest, AppInfo, GamesReport, GamesRequest, IntegrationInfo, Lists, Settings, SettingsPatch, ShortcutInfo, SteamAccountInfo, SteamManagerApi, StatusInfo, SyncReport, SyncRequest } from './ipc.js';
+import type { AboutInfo, ApiKeyStatus, ApiKeyTest, AppInfo, ArtworkItem, ArtworkRequest, ArtworkResult, GamesReport, GamesRequest, IntegrationInfo, Lists, Settings, SettingsPatch, ShortcutInfo, SteamAccountInfo, SteamManagerApi, StatusInfo, SyncReport, SyncRequest } from './ipc.js';
 import { findSteamRoot, listAccounts } from './steam/locate.js';
 import { defaultRunner, isSteamRunning } from './steam/running.js';
 import { computeAppId, isManaged, MANAGED_TAG, quote, shortcutAppId, shortcutTags, shortcutTitle } from './steam/shortcuts.js';
@@ -62,6 +65,38 @@ export function parseGamesRequest(value: unknown): GamesRequest {
   return { includeMaybe: (value as Record<string, unknown>)['includeMaybe'] === true };
 }
 
+/** Validates an artwork download request that came from the (untrusted) renderer. */
+export function parseArtworkRequest(value: unknown): ArtworkRequest {
+  const request = (typeof value === 'object' && value !== null ? value : {}) as Record<string, unknown>;
+  const { appId, title } = request;
+  if (typeof appId !== 'number' || !Number.isInteger(appId) || appId < 0) throw new Error('Invalid artwork request: appId must be a whole number');
+  if (typeof title !== 'string' || title.trim() === '') throw new Error('Invalid artwork request: title is required');
+  return { appId, title: title.trim(), force: request['force'] === true };
+}
+
+/**
+ * Answers requests for `steam-manager-art://grid/<file>` with the image from Steam's grid folder.
+ * Used by the desktop app so the page can show images without any file access.
+ */
+export function createArtworkServer(deps: ApiDeps): (url: string) => Promise<ArtworkResponse> {
+  return async (url) => {
+    let name: string;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== `${ARTWORK_SCHEME}:` || parsed.hostname !== 'grid') return { status: 400 };
+      name = decodeURIComponent(parsed.pathname.slice(1));
+    } catch {
+      return { status: 400 };
+    }
+    try {
+      const { gridDir } = await openUser({ ...deps, log: console.debug }, {});
+      return await readArtworkFile(gridDir, name);
+    } catch {
+      return { status: 404 };
+    }
+  };
+}
+
 /** The CLI's commands as data, for UIs. Never throws for "Steam not found" in `status`; `sync` reports errors in the result. */
 export function createApi(deps: ApiDeps): SteamManagerApi {
   /** Read-only calls log nothing the UI needs; anything unexpected goes to the console. */
@@ -71,6 +106,23 @@ export function createApi(deps: ApiDeps): SteamManagerApi {
   /** The key to download artwork with: the one saved in the app, else the environment variable. */
   async function apiKey(): Promise<string | undefined> {
     return (await deps.secrets?.get(API_KEY)) || deps.env['STEAMGRIDDB_API_KEY'] || undefined;
+  }
+
+  /** The images in Steam's grid folder for these shortcuts; none if Steam cannot be found. */
+  async function artwork(appIds: number[]): Promise<Record<number, ArtworkItem[]>> {
+    if (!Array.isArray(appIds) || appIds.some((id) => !Number.isInteger(id))) throw new Error('Invalid app IDs');
+    let gridDir: string;
+    try {
+      gridDir = (await openUser(context(), {})).gridDir;
+    } catch {
+      return {};
+    }
+    const found: Record<number, ArtworkItem[]> = {};
+    for (const file of await listArtwork(gridDir, new Set(appIds))) {
+      (found[file.appId] ??= []).push({ kind: file.kind, url: artworkUrl(file.file, file.version) });
+    }
+    for (const items of Object.values(found)) items.sort((a, b) => ARTWORK_KINDS.indexOf(a.kind) - ARTWORK_KINDS.indexOf(b.kind));
+    return found;
   }
 
   async function apiKeyStatus(): Promise<ApiKeyStatus> {
@@ -238,6 +290,20 @@ export function createApi(deps: ApiDeps): SteamManagerApi {
       if (!deps.openPath) throw new Error('Opening folders is not available here.');
       await mkdir(dir(), { recursive: true });
       await deps.openPath(dir());
+    },
+
+    artwork,
+
+    async downloadArtwork(request: ArtworkRequest): Promise<ArtworkResult> {
+      const { appId, title, force } = parseArtworkRequest(request);
+      const key = await apiKey();
+      if (!key) throw new Error('Add a SteamGridDB API key in Settings to download artwork.');
+      const { gridDir } = await openUser(context(), {});
+      const outcomes = await installArtwork({ gridDir, appId, title, client: new SteamGridDbClient(key, deps.fetchFn), fetchFn: deps.fetchFn, force });
+      return {
+        outcomes: outcomes.map(({ kind, status, error }) => ({ kind, status, error })),
+        items: (await artwork([appId]))[appId] ?? [],
+      };
     },
 
     async sync(request: SyncRequest): Promise<SyncReport> {

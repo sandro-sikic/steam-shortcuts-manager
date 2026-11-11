@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { GamesReport, IntegrationInfo, Settings, SettingsPatch, ShortcutInfo, StatusInfo } from '../ipc.js';
+import type { ArtworkItem, GamesReport, IntegrationInfo, Settings, SettingsPatch, ShortcutInfo, StatusInfo } from '../ipc.js';
 import { DEFAULT_SETTINGS } from '../settingsModel.js';
 import { api, errorMessage } from './api.js';
+import { GamePage } from './GamePage.js';
 import { Header } from './Header.js';
 import { Library } from './Library.js';
 import { SettingsPage } from './SettingsPage.js';
@@ -17,7 +18,9 @@ export function App() {
   const [report, setReport] = useState<GamesReport>(NO_GAMES);
   /** Set when the user flips the switch in the sync panel; until then the saved setting decides. */
   const [maybeChoice, setMaybeChoice] = useState<boolean>();
-  const [view, setView] = useState<'library' | 'settings'>('library');
+  const [art, setArt] = useState<Record<number, ArtworkItem[]>>({});
+  const [view, setView] = useState<'library' | 'settings' | 'game'>('library');
+  const [openKey, setOpenKey] = useState<string>();
   const [error, setError] = useState<string>();
   const [loading, setLoading] = useState(true);
 
@@ -31,7 +34,9 @@ export function App() {
       setStatus(nextStatus);
       setIntegrations(nextIntegrations);
       setReport(nextReport);
-      setShortcuts(nextStatus.error ? [] : await api().shortcuts());
+      const nextShortcuts = nextStatus.error ? [] : await api().shortcuts();
+      setShortcuts(nextShortcuts);
+      setArt(await api().artwork([...new Set([...nextReport.games.map((game) => game.appId), ...nextShortcuts.map((shortcut) => shortcut.appId)])]));
     } catch (failure) {
       setError(errorMessage(failure));
     } finally {
@@ -80,6 +85,8 @@ export function App() {
     }
   }
 
+  const openGame = view === 'game' ? report.games.find((game) => game.key === openKey) : undefined;
+
   const pending = {
     add: report.games.filter((game) => !game.excluded && !game.inSteam).length,
     remove: report.games.filter((game) => game.excluded && game.inSteam).length,
@@ -88,6 +95,16 @@ export function App() {
   return (
     <div className="app">
       <Header status={status} loading={loading} settingsOpen={view === 'settings'} onRefresh={() => void load()} onToggleSettings={() => (view === 'settings' ? showLibrary() : setView('settings'))} />
+      {openGame && (
+        <GamePage
+          game={openGame}
+          items={art[openGame.appId] ?? []}
+          onBack={() => setView('library')}
+          onToggle={(include) => void toggle([openGame.key], include)}
+          onOpenSettings={() => setView('settings')}
+          onArtworkChanged={(appId, items) => setArt((current) => ({ ...current, [appId]: items }))}
+        />
+      )}
       {error && <p className="callout danger" role="alert">{error}</p>}
       {view === 'settings' && settings && (
         <SettingsPage
@@ -100,7 +117,7 @@ export function App() {
           onBack={showLibrary}
         />
       )}
-      {view === 'library' && (
+      {!openGame && view !== 'settings' && (
         <>
           {status?.error && (
             <div className="callout danger" role="alert">
@@ -125,7 +142,17 @@ export function App() {
             </p>
           )}
           <main className="layout">
-            <Library report={report} shortcuts={shortcuts} loading={loading} onToggle={(keys, include) => void toggle(keys, include)} />
+            <Library
+              report={report}
+              shortcuts={shortcuts}
+              art={art}
+              loading={loading}
+              onToggle={(keys, include) => void toggle(keys, include)}
+              onOpen={(key) => {
+                setOpenKey(key);
+                setView('game');
+              }}
+            />
             <SyncPanel
               key={settings ? 'ready' : 'loading'}
               integrations={integrations}

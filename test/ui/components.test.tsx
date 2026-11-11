@@ -97,7 +97,7 @@ describe('Check', () => {
 describe('Library', () => {
   const renderLibrary = (props: Partial<Parameters<typeof Library>[0]> = {}) => {
     const onToggle = vi.fn();
-    render(<Library report={gamesReport} shortcuts={shortcuts} loading={false} onToggle={onToggle} {...props} />);
+    render(<Library report={gamesReport} shortcuts={shortcuts} art={{}} loading={false} onToggle={onToggle} onOpen={vi.fn()} {...props} />);
     return onToggle;
   };
   const box = (name: string | RegExp) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
@@ -127,6 +127,46 @@ describe('Library', () => {
   it('shows the groups in order: launchers, your shortcuts, no longer found', () => {
     renderLibrary();
     expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Epic Games', 'GOG Galaxy', 'Your shortcuts', 'No longer found']);
+  });
+
+  it('opens a game when its card is clicked, but not when only its checkbox is', () => {
+    const onOpen = vi.fn();
+    const onToggle = renderLibrary({ onOpen });
+    fireEvent.click(screen.getByRole('button', { name: 'Open Rocket League' }));
+    expect(onOpen).toHaveBeenCalledWith('Epic Games:rl');
+    fireEvent.click(box(/Fortnite/));
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  describe('posters', () => {
+    const poster = (url: string) => [{ kind: 'poster' as const, url }];
+    const imageOf = (name: string) => (screen.getByText(name).closest('li') as HTMLElement).querySelector('img');
+
+    it('shows the downloaded poster of a game, and the generated cover for games without one', () => {
+      renderLibrary({ art: { 1: [...poster('steam-manager-art://grid/1p.png?v=1'), { kind: 'hero', url: 'x://hero' }], 5: [{ kind: 'hero', url: 'x://only-hero' }] } });
+      expect(imageOf('Fortnite')?.getAttribute('src')).toBe('steam-manager-art://grid/1p.png?v=1');
+      expect(imageOf('Fortnite')?.getAttribute('loading')).toBe('lazy');
+      expect(imageOf('Rocket League')).toBeNull();
+      expect(imageOf('Hades')).toBeNull();
+      expect(screen.getAllByText('RL').length).toBeGreaterThan(0);
+    });
+
+    it('shows posters on the cards for your own shortcuts and for ones no longer found too', () => {
+      renderLibrary({ art: { 2: poster('x://mine'), 3: poster('x://old') } });
+      expect(imageOf('My Own Game')?.getAttribute('src')).toBe('x://mine');
+      expect(imageOf('Old Game')?.getAttribute('src')).toBe('x://old');
+    });
+
+    it('falls back to the cover when the image cannot be loaded, and tries a new image again', () => {
+      const props = { report: gamesReport, shortcuts, loading: false, onToggle: vi.fn(), onOpen: vi.fn() };
+      const { rerender } = render(<Library {...props} art={{ 1: poster('x://broken') }} />);
+      fireEvent.error(imageOf('Fortnite') as HTMLImageElement);
+      expect(imageOf('Fortnite')).toBeNull();
+      expect(screen.getAllByText('F').length).toBeGreaterThan(0);
+      rerender(<Library {...props} art={{ 1: poster('x://fixed') }} />);
+      expect(imageOf('Fortnite')?.getAttribute('src')).toBe('x://fixed');
+    });
   });
 
   it('shows what will happen to each game and marks weak guesses', () => {

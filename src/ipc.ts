@@ -3,9 +3,10 @@
  * so both sides (and the preload script) can agree without sharing any Node code.
  */
 
+import type { ArtworkKind } from './artwork/kinds.js';
 import type { Settings, SettingsPatch } from './settingsModel.js';
 
-export type { Settings, SettingsPatch };
+export type { ArtworkKind, Settings, SettingsPatch };
 
 export interface StatusInfo {
   platform: string;
@@ -145,6 +146,27 @@ export interface AboutInfo {
   secureStorage: boolean;
 }
 
+/** One image for a game, ready for an `<img src>`. */
+export interface ArtworkItem {
+  kind: ArtworkKind;
+  url: string;
+}
+
+export interface ArtworkRequest {
+  /** The game's Steam shortcut ID (see `GameInfo.appId`). */
+  appId: number;
+  title: string;
+  /** Download again even if the image exists. */
+  force: boolean;
+}
+
+export interface ArtworkResult {
+  /** What happened for each kind. */
+  outcomes: { kind: ArtworkKind; status: 'saved' | 'exists' | 'missing' | 'failed'; error?: string }[];
+  /** All images the game has now. */
+  items: ArtworkItem[];
+}
+
 export interface SteamManagerApi {
   status(): Promise<StatusInfo>;
   shortcuts(): Promise<ShortcutInfo[]>;
@@ -171,6 +193,10 @@ export interface SteamManagerApi {
   steamAccounts(): Promise<SteamAccountInfo[]>;
   about(): Promise<AboutInfo>;
   openConfigFolder(): Promise<void>;
+  /** The images downloaded for these shortcuts, by app ID. Games without any are left out. */
+  artwork(appIds: number[]): Promise<Record<number, ArtworkItem[]>>;
+  /** Downloads a game's images from SteamGridDB into Steam's grid folder. Needs an API key. */
+  downloadArtwork(request: ArtworkRequest): Promise<ArtworkResult>;
 }
 
 export const CHANNELS = {
@@ -192,6 +218,8 @@ export const CHANNELS = {
   steamAccounts: 'steam-manager:steam-accounts',
   about: 'steam-manager:about',
   openConfigFolder: 'steam-manager:open-config-folder',
+  artwork: 'steam-manager:artwork',
+  downloadArtwork: 'steam-manager:download-artwork',
 } as const satisfies Record<keyof SteamManagerApi, string>;
 
 /** The part of Electron's `ipcMain` we use, so registration can be tested without Electron. */

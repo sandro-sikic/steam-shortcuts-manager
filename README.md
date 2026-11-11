@@ -19,7 +19,7 @@ npm run start    # production build, then launch Electron
 - `electron/main.ts` creates the window (context isolation and sandbox on, no node integration, navigation locked)
   and `electron/preload.cts` exposes the bridge. The CommonJS preload repeats the channel names from `src/ipc.ts`;
   a test keeps them in sync.
-- `src/ipc.ts` is the typed contract (status, shortcuts, integrations, apps, games, setExcluded, sync, settings, updateSettings, resetSettings, lists, setLists, apiKeyStatus, setApiKey, testApiKey, steamAccounts, about, openConfigFolder) and `src/api.ts` implements it on
+- `src/ipc.ts` is the typed contract (status, shortcuts, integrations, apps, games, setExcluded, sync, settings, updateSettings, resetSettings, lists, setLists, apiKeyStatus, setApiKey, testApiKey, steamAccounts, about, openConfigFolder, artwork, downloadArtwork) and `src/api.ts` implements it on
   top of the same code the CLI uses, returning data instead of printing. To add a feature: add the method to
   `SteamManagerApi` and `CHANNELS`, implement it in `api.ts`, repeat the channel in the preload, and call it from the UI.
 - The UI defaults to a dry run. Syncing writes only while Steam is closed.
@@ -85,6 +85,22 @@ Unchecking saves the game's key (`store:id`) to the `exclude` list in `config.js
 ```json
 { "allow": ["Some Game"], "deny": ["Some Tool"], "exclude": ["Epic Games:fn"] }
 ```
+
+## Game pages and artwork
+
+Tap a game card in the library to open its page: title, a back button, the store and what Apply will do, an
+"Add to Steam" switch, and every image downloaded for the game (hero, poster, wide capsule, logo, icon) with a
+"Not downloaded" placeholder for any that are missing. The checkbox in a card's corner still ticks the game on or off
+without opening it.
+
+- Images are the ones in Steam's grid folder (`userdata/<id>/config/grid`, named by the game's shortcut ID). Sync downloads
+  them for added games when artwork is on and a key is set; the game page's **Download artwork** (and **Download again**)
+  fetches all five kinds for that one game, even before it is added to Steam.
+- The library shows a game's real poster when one exists, and the generated cover otherwise (also if an image fails to load).
+  Without a SteamGridDB key nothing is downloaded, so cards keep their placeholders until the key is set in Settings.
+- The page never touches files: the desktop app serves grid images from a `steam-manager-art://grid/<file>` scheme that only
+  accepts grid file names (no paths) and the page's security policy allows images from it and nothing else.
+- Only the single top-rated image per kind is downloaded. Browsing other SteamGridDB alternatives is not built yet.
 
 ## Settings
 

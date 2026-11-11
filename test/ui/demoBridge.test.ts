@@ -145,4 +145,36 @@ describe('demo bridge', () => {
     expect(await bridge.about()).toMatchObject({ version: 'demo', steamRoot: '/demo/Steam', secureStorage: true });
     await expect(bridge.openConfigFolder()).resolves.toBeUndefined();
   });
+
+  it('lists generated images for the games that have artwork, in the usual order', async () => {
+    const bridge = createDemoBridge();
+    const found = await bridge.artwork([1000, 1002, 1003, 99999]);
+    expect(Object.keys(found).sort()).toEqual(['1000', '1002']);
+    expect(found[1000]?.map((i) => i.kind)).toEqual(['poster', 'wide', 'hero', 'logo', 'icon']);
+    expect(found[1002]?.map((i) => i.kind)).toEqual(['poster', 'hero']);
+    const svg = decodeURIComponent((found[1000]?.[0]?.url ?? '').replace('data:image/svg+xml;utf8,', ''));
+    expect(svg).toContain('>Fortnite<');
+    expect(svg).toContain("viewBox='0 0 600 900'");
+    expect(decodeURIComponent((found[1000]?.[3]?.url ?? '')).includes("fill='url(#g)'")).toBe(false);
+    expect(decodeURIComponent((found[1000]?.[4]?.url ?? ''))).toContain('>F<');
+  });
+
+  it('needs a key to download, then fills in what is missing', async () => {
+    const bridge = createDemoBridge();
+    await expect(bridge.downloadArtwork({ appId: 1002, title: 'Hades', force: false })).rejects.toThrow('Add a SteamGridDB API key in Settings');
+    await bridge.setApiKey('demo-key-12345');
+    const partial = await bridge.downloadArtwork({ appId: 1002, title: 'Hades', force: false });
+    expect(partial.outcomes.map((o) => o.status)).toEqual(['exists', 'saved', 'exists', 'saved', 'saved']);
+    expect(partial.items).toHaveLength(5);
+    expect((await bridge.downloadArtwork({ appId: 1002, title: 'Hades', force: true })).outcomes.every((o) => o.status === 'saved')).toBe(true);
+  });
+
+  it('can download for a game that had no artwork at all, cleaning odd characters out of the title', async () => {
+    const bridge = createDemoBridge();
+    await bridge.setApiKey('demo-key-12345');
+    const result = await bridge.downloadArtwork({ appId: 1003, title: 'Cyber <b>& Co', force: false });
+    expect(result.outcomes.every((o) => o.status === 'saved')).toBe(true);
+    expect(decodeURIComponent(result.items[0]?.url ?? '')).toContain('>Cyber b Co<');
+    expect(Object.keys(await bridge.artwork([1003]))).toEqual(['1003']);
+  });
 });

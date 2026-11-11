@@ -21,4 +21,6 @@ contextBridge.exposeInMainWorld('steamManager', {
   steamAccounts: () => ipcRenderer.invoke('steam-manager:steam-accounts'),
   about: () => ipcRenderer.invoke('steam-manager:about'),
   openConfigFolder: () => ipcRenderer.invoke('steam-manager:open-config-folder'),
+  artwork: (appIds: number[]) => ipcRenderer.invoke('steam-manager:artwork', appIds),
+  downloadArtwork: (request: unknown) => ipcRenderer.invoke('steam-manager:download-artwork', request),
 });

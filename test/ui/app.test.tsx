@@ -5,6 +5,8 @@ import { App } from '../../src/UI/App.js';
 import { applySettings, DEFAULT_SETTINGS } from '../../src/settingsModel.js';
 import { emptyReport, gamesReport, installApi, okStatus, settings } from './mockApi.js';
 
+const poster = (appId: number) => ({ [appId]: [{ kind: 'poster' as const, url: `steam-manager-art://grid/${appId}p.png?v=1` }] });
+
 afterEach(cleanup);
 
 const preview = () => screen.getByRole('button', { name: 'Preview changes' }) as HTMLButtonElement;
@@ -264,5 +266,91 @@ describe('App auto-apply', () => {
     fireEvent.click(box(/Fortnite/));
     await waitFor(() => expect(off.setExcluded).toHaveBeenCalled());
     expect(off.sync).not.toHaveBeenCalled();
+  });
+});
+
+describe('App game page', () => {
+  it('loads the artwork of every game and shortcut, and shows posters in the library', async () => {
+    const mock = installApi({ artwork: vi.fn(async () => poster(1)) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    expect(mock.artwork).toHaveBeenCalledWith([1, 4, 5, 6, 2, 3]);
+    await waitFor(() => expect((screen.getByText('Fortnite').closest('li') as HTMLElement).querySelector('img')?.getAttribute('src')).toBe('steam-manager-art://grid/1p.png?v=1'));
+  });
+
+  it('opens a game when its card is tapped, and goes back to the library', async () => {
+    installApi({ artwork: vi.fn(async () => ({ 1: [{ kind: 'hero' as const, url: 'steam-manager-art://grid/1_hero.png' }] })) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Fortnite' }));
+
+    expect(screen.getByRole('heading', { name: 'Fortnite', level: 2 })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Artwork' })).toBeTruthy();
+    expect(screen.getByRole('img', { name: 'Hero image' }).getAttribute('src')).toBe('steam-manager-art://grid/1_hero.png');
+    expect(screen.queryByRole('region', { name: 'Library' })).toBeNull();
+    expect(screen.queryByText('Preview changes')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
+    expect(screen.getByRole('region', { name: 'Library' })).toBeTruthy();
+  });
+
+  it('switches the game on or off from its page', async () => {
+    const mock = installApi();
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Fortnite' }));
+    fireEvent.click(screen.getByRole('switch', { name: 'Add to Steam' }));
+    await waitFor(() => expect(mock.setExcluded).toHaveBeenCalledWith(['Epic Games:fn'], true));
+    await waitFor(() => expect((screen.getByRole('switch', { name: 'Add to Steam' }) as HTMLInputElement).checked).toBe(false));
+  });
+
+  it('shows downloaded images straight away, on the page and in the library', async () => {
+    const mock = installApi({
+      apiKeyStatus: vi.fn(async () => ({ set: true, source: 'saved' as const, secureStorage: true })),
+      downloadArtwork: vi.fn(async () => ({ outcomes: [], items: [{ kind: 'poster' as const, url: 'steam-manager-art://grid/4p.png?v=2' }] })),
+    });
+    render(<App />);
+    await screen.findByText('Rocket League');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Rocket League' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Download artwork' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Download artwork' }));
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Poster image' }).getAttribute('src')).toBe('steam-manager-art://grid/4p.png?v=2'));
+    expect(mock.downloadArtwork).toHaveBeenCalledWith({ appId: 4, title: 'Rocket League', force: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
+    expect((screen.getByText('Rocket League').closest('li') as HTMLElement).querySelector('img')?.getAttribute('src')).toBe('steam-manager-art://grid/4p.png?v=2');
+  });
+
+  it('opens settings from the game page, from the missing-key notice and from the gear', async () => {
+    installApi({ apiKeyStatus: vi.fn(async () => ({ set: false, source: 'none' as const, secureStorage: true })) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Fortnite' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open settings' }));
+    expect(screen.getByRole('region', { name: 'Artwork' }).textContent).toContain('SteamGridDB API key');
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Fortnite' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.getByRole('navigation', { name: 'Settings sections' })).toBeTruthy();
+  });
+
+  it('shows the library again when the open game is gone after a refresh', async () => {
+    const games = vi.fn().mockResolvedValueOnce(gamesReport).mockResolvedValue({ ...gamesReport, games: [] });
+    installApi({ games });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Fortnite' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await screen.findByRole('region', { name: 'Library' });
+    expect(screen.queryByRole('heading', { name: 'Fortnite', level: 2 })).toBeNull();
+    expect(screen.getByRole('region', { name: 'No longer found' })).toBeTruthy();
+  });
+
+  it('shows an error when the artwork cannot be listed, and still shows the library', async () => {
+    installApi({ artwork: vi.fn(async () => { throw new Error("Error invoking remote method 'x': Error: Invalid app IDs"); }) });
+    render(<App />);
+    expect((await screen.findByRole('alert')).textContent).toBe('Invalid app IDs');
+    expect(screen.getByText('Fortnite')).toBeTruthy();
   });
 });

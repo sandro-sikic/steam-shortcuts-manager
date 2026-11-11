@@ -71,6 +71,8 @@ export function installApi(overrides: Partial<MockApi> = {}): MockApi {
     steamAccounts: vi.fn(async () => accounts),
     about: vi.fn(async () => about),
     openConfigFolder: vi.fn(async () => undefined),
+    artwork: vi.fn(async () => ({})),
+    downloadArtwork: vi.fn(async () => ({ outcomes: [], items: [] })),
     ...overrides,
   };
   window.steamManager = mock as unknown as SteamManagerApi;

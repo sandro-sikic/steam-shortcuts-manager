@@ -1,18 +1,9 @@
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ARTWORK_KINDS, type ArtworkKind } from './kinds.js';
+import { ARTWORK_KINDS, ARTWORK_SUFFIXES as SUFFIXES, type ArtworkKind } from './kinds.js';
 import type { FetchLike, SteamGridDbClient } from './steamgriddb.js';
 
 export { ARTWORK_KINDS };
-
-/** File-name suffix Steam expects in `userdata/<id>/config/grid` for each artwork kind. */
-const SUFFIXES: Record<ArtworkKind, string> = {
-  poster: 'p',
-  wide: '',
-  hero: '_hero',
-  logo: '_logo',
-  icon: '_icon',
-};
 
 export type ArtworkStatus = 'saved' | 'exists' | 'missing' | 'failed';
 

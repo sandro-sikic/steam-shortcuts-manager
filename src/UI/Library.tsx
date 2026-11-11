@@ -1,18 +1,16 @@
 import { useState } from 'react';
-import type { DuplicateInfo, GameInfo, GamesReport, ShortcutInfo } from '../ipc.js';
+import type { ArtworkItem, DuplicateInfo, GameInfo, GamesReport, ShortcutInfo } from '../ipc.js';
 import { Check } from './Check.js';
 import { coverHue, initials } from './cover.js';
+import { stateOf } from './gameState.js';
 import { SearchIcon } from './icons.js';
 
 type Hue = React.CSSProperties;
 
-/** What will happen to a game on the next Apply, given its checkbox and whether it is in Steam. */
-function stateOf(game: GameInfo): { label: string; tone: string } | undefined {
-  if (game.excluded) return game.inSteam ? { label: 'Will remove', tone: 'remove' } : undefined;
-  return game.inSteam ? { label: 'In Steam', tone: 'in' } : { label: 'Will add', tone: 'add' };
-}
-
-function Cover({ title }: { title: string }) {
+/** The game's poster when it has one, else the generated cover (also when the image fails to load). */
+function Art({ title, poster }: { title: string; poster?: string }) {
+  const [failed, setFailed] = useState<string>();
+  if (poster && poster !== failed) return <img className="card-poster" src={poster} alt="" loading="lazy" onError={() => setFailed(poster)} />;
   return (
     <div className="cover" aria-hidden="true">
       {initials(title)}
@@ -20,27 +18,27 @@ function Cover({ title }: { title: string }) {
   );
 }
 
-function GameCard({ game, onToggle }: { game: GameInfo; onToggle: (keys: string[], include: boolean) => void }) {
+function GameCard({ game, poster, onToggle, onOpen }: { game: GameInfo; poster?: string; onToggle: (keys: string[], include: boolean) => void; onOpen: (key: string) => void }) {
   const state = stateOf(game);
   return (
     <li className={game.excluded ? 'game off' : 'game'} style={{ '--hue': coverHue(game.title) } as Hue}>
-      <label className="game-label">
-        <Check checked={!game.excluded} onChange={(include) => onToggle([game.key], include)} />
-        <Cover title={game.title} />
-        {state && <span className={`origin ${state.tone}`}>{state.label}</span>}
+      <button type="button" className="game-open" aria-label={`Open ${game.title}`} onClick={() => onOpen(game.key)}>
+        <Art title={game.title} poster={poster} />
         <span className="game-info">
           <span className="game-title">{game.title}</span>
           {game.weak && <span className="chip">Guess</span>}
         </span>
-      </label>
+      </button>
+      <Check checked={!game.excluded} label={`Add ${game.title} to Steam`} onChange={(include) => onToggle([game.key], include)} />
+      {state && <span className={`origin ${state.tone}`}>{state.label}</span>}
     </li>
   );
 }
 
-function ShortcutCard({ shortcut, label }: { shortcut: ShortcutInfo; label: { text: string; tone: string; hint: string } }) {
+function ShortcutCard({ shortcut, poster, label }: { shortcut: ShortcutInfo; poster?: string; label: { text: string; tone: string; hint: string } }) {
   return (
     <li className="game fixed" style={{ '--hue': coverHue(shortcut.title) } as Hue}>
-      <Cover title={shortcut.title} />
+      <Art title={shortcut.title} poster={poster} />
       <span className={`origin ${label.tone}`} title={label.hint}>
         {label.text}
       </span>
@@ -87,14 +85,20 @@ function selection(games: GameInfo[]): { checked: boolean; indeterminate: boolea
 export function Library({
   report,
   shortcuts,
+  art,
   loading,
   onToggle,
+  onOpen,
 }: {
   report: GamesReport;
   shortcuts: ShortcutInfo[];
+  /** The downloaded images by shortcut ID. */
+  art: Record<number, ArtworkItem[]>;
   loading: boolean;
   onToggle: (keys: string[], include: boolean) => void;
+  onOpen: (key: string) => void;
 }) {
+  const posterOf = (appId: number): string | undefined => art[appId]?.find((item) => item.kind === 'poster')?.url;
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
   const matches = (title: string): boolean => title.toLowerCase().includes(needle);
@@ -140,7 +144,7 @@ export function Library({
               </div>
               <ul className="grid">
                 {games.map((game) => (
-                  <GameCard key={game.key} game={game} onToggle={onToggle} />
+                  <GameCard key={game.key} game={game} poster={posterOf(game.appId)} onToggle={onToggle} onOpen={onOpen} />
                 ))}
               </ul>
             </section>
@@ -154,7 +158,7 @@ export function Library({
             </div>
             <ul className="grid">
               {yours.map((shortcut) => (
-                <ShortcutCard key={shortcut.appId} shortcut={shortcut} label={{ text: 'Yours', tone: 'yours', hint: 'Added by you' }} />
+                <ShortcutCard key={shortcut.appId} shortcut={shortcut} poster={posterOf(shortcut.appId)} label={{ text: 'Yours', tone: 'yours', hint: 'Added by you' }} />
               ))}
             </ul>
           </section>
@@ -167,7 +171,7 @@ export function Library({
             </div>
             <ul className="grid">
               {gone.map((shortcut) => (
-                <ShortcutCard key={shortcut.appId} shortcut={shortcut} label={{ text: 'Not found', tone: 'gone', hint: 'Created by Steam Manager' }} />
+                <ShortcutCard key={shortcut.appId} shortcut={shortcut} poster={posterOf(shortcut.appId)} label={{ text: 'Not found', tone: 'gone', hint: 'Created by Steam Manager' }} />
               ))}
             </ul>
           </section>

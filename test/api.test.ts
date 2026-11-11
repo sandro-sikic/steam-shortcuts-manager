@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createApi, parseGamesRequest, parseSyncRequest, systemDeps, type ApiDeps } from '../src/api.js';
+import { createApi, createArtworkServer, parseArtworkRequest, parseGamesRequest, parseSyncRequest, systemDeps, type ApiDeps } from '../src/api.js';
 import { integrations } from '../src/integrations/index.js';
 import type { Integration } from '../src/integrations/types.js';
 import { buildShortcut, MANAGED_TAG } from '../src/steam/shortcuts.js';
@@ -512,5 +512,134 @@ describe('settings take effect', () => {
     await api.updateSettings({ artwork: { kinds: ['hero'] } });
     await api.sync({ ...request, artwork: true });
     expect(fetchFn.requests.map((r) => r.url)).toEqual(Object.keys(routes));
+  });
+});
+
+describe('parseArtworkRequest', () => {
+  it('reads a request, trimming the title and defaulting force to off', () => {
+    expect(parseArtworkRequest({ appId: 12, title: '  Hades ' })).toEqual({ appId: 12, title: 'Hades', force: false });
+    expect(parseArtworkRequest({ appId: 0, title: 'x', force: true })).toEqual({ appId: 0, title: 'x', force: true });
+    expect(parseArtworkRequest({ appId: 1, title: 'x', force: 'yes' }).force).toBe(false);
+  });
+
+  it.each([
+    [null, 'appId must be a whole number'],
+    ['x', 'appId must be a whole number'],
+    [{ title: 'x' }, 'appId must be a whole number'],
+    [{ appId: '5', title: 'x' }, 'appId must be a whole number'],
+    [{ appId: 1.5, title: 'x' }, 'appId must be a whole number'],
+    [{ appId: -1, title: 'x' }, 'appId must be a whole number'],
+    [{ appId: 1 }, 'title is required'],
+    [{ appId: 1, title: '   ' }, 'title is required'],
+    [{ appId: 1, title: 5 }, 'title is required'],
+  ])('rejects %j', (value, message) => {
+    expect(() => parseArtworkRequest(value)).toThrow(message);
+  });
+});
+
+describe('api artwork', () => {
+  const API = 'https://www.steamgriddb.com/api/v2';
+  const routes = {
+    [`${API}/search/autocomplete/Fortnite`]: { json: { success: true, data: [{ id: 1 }] } },
+    [`${API}/grids/game/1?dimensions=600x900&types=static`]: { json: { success: true, data: [{ url: 'https://c/p.png' }] } },
+    [`${API}/grids/game/1?dimensions=920x430,460x215&types=static`]: { json: { success: true, data: [] } },
+    [`${API}/heroes/game/1?types=static`]: { json: { success: true, data: [{ url: 'https://c/h.jpg' }] } },
+    [`${API}/logos/game/1?types=static`]: { json: { success: true, data: [] } },
+    [`${API}/icons/game/1?types=static`]: { json: { success: true, data: [{ url: 'https://c/i.ico' }] } },
+    'https://c/p.png': { body: Buffer.from('POSTER') },
+    'https://c/h.jpg': { body: Buffer.from('HERO') },
+    'https://c/i.ico': { body: Buffer.from('ICON') },
+  };
+  const grid = (configDir: string) => path.join(configDir, 'grid');
+  const put = async (configDir: string, name: string, content = 'x') => {
+    await mkdir(grid(configDir), { recursive: true });
+    await writeFile(path.join(grid(configDir), name), content);
+  };
+
+  it('lists the downloaded images by shortcut, in the usual order, as URLs the app serves', async () => {
+    const { api, configDir } = await setup();
+    for (const name of ['5_icon.png', '5p.png', '5_hero.jpg', '5.png', '6p.png', '7p.png', 'readme.txt']) await put(configDir, name);
+    const found = await api.artwork([5, 6, 99]);
+    expect(Object.keys(found).sort()).toEqual(['5', '6']);
+    expect(found[5]?.map((i) => i.kind)).toEqual(['poster', 'wide', 'hero', 'icon']);
+    expect(found[5]?.[0]?.url).toMatch(/^steam-manager-art:\/\/grid\/5p\.png\?v=\d+$/);
+    expect(found[6]).toHaveLength(1);
+  });
+
+  it('is empty without images, and when Steam cannot be found', async () => {
+    const { api, deps } = await setup();
+    expect(await api.artwork([1])).toEqual({});
+    expect(await createApi({ ...deps, home: await makeTempDir() }).artwork([1])).toEqual({});
+  });
+
+  it('rejects invalid app IDs', async () => {
+    const { api } = await setup();
+    await expect(api.artwork('1' as never)).rejects.toThrow('Invalid app IDs');
+    await expect(api.artwork([1.5])).rejects.toThrow('Invalid app IDs');
+  });
+
+  it('downloads all the images of a game with the key, and returns what it now has', async () => {
+    const { api, configDir } = await setup({ env: { STEAMGRIDDB_API_KEY: 'k' }, extra: { fetchFn: fakeFetch(routes) } });
+    const result = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: false });
+    expect(result.outcomes.map((o) => [o.kind, o.status])).toEqual([['poster', 'saved'], ['wide', 'missing'], ['hero', 'saved'], ['logo', 'missing'], ['icon', 'saved']]);
+    expect(result.items.map((i) => i.kind)).toEqual(['poster', 'hero', 'icon']);
+    expect(await readFile(path.join(grid(configDir), '7p.png'), 'utf8')).toBe('POSTER');
+    expect(await readFile(path.join(grid(configDir), '7_hero.jpg'), 'utf8')).toBe('HERO');
+    expect((await api.artwork([7]))[7]).toHaveLength(3);
+  });
+
+  it('keeps existing images unless forced, and downloads with the key saved in the app', async () => {
+    const secrets = memorySecrets();
+    secrets.data.set('steamgriddb', 'savedkey');
+    const fetchFn = fakeFetch(routes);
+    const { api, configDir } = await setup({ extra: { secrets, fetchFn } });
+    await put(configDir, '7p.png', 'OLD');
+    const kept = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: false });
+    expect(kept.outcomes[0]).toMatchObject({ kind: 'poster', status: 'exists' });
+    expect(await readFile(path.join(grid(configDir), '7p.png'), 'utf8')).toBe('OLD');
+    expect(fetchFn.requests[0]?.auth).toBe('Bearer savedkey');
+    const forced = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: true });
+    expect(forced.outcomes[0]).toMatchObject({ kind: 'poster', status: 'saved' });
+    expect(await readFile(path.join(grid(configDir), '7p.png'), 'utf8')).toBe('POSTER');
+  });
+
+  it('reports failures per image instead of throwing', async () => {
+    const { api } = await setup({ env: { STEAMGRIDDB_API_KEY: 'bad' }, extra: { fetchFn: fakeFetch({ [`${API}/search/autocomplete/Fortnite`]: { status: 401 } }) } });
+    const result = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: false });
+    expect(result.outcomes.every((o) => o.status === 'failed' && o.error?.includes('HTTP 401'))).toBe(true);
+    expect(result.items).toEqual([]);
+  });
+
+  it('asks for a key when there is none, and rejects bad requests or a missing Steam', async () => {
+    const { api, deps } = await setup();
+    await expect(api.downloadArtwork({ appId: 1, title: 'x', force: false })).rejects.toThrow('Add a SteamGridDB API key in Settings');
+    await expect(api.downloadArtwork({ appId: 'x' } as never)).rejects.toThrow('Invalid artwork request');
+    const noSteam = createApi({ ...deps, env: { STEAMGRIDDB_API_KEY: 'k' }, home: await makeTempDir() });
+    await expect(noSteam.downloadArtwork({ appId: 1, title: 'x', force: false })).rejects.toThrow('Steam installation not found');
+  });
+});
+
+describe('artwork server', () => {
+  it('serves an image from the grid folder, and refuses everything else', async () => {
+    const { deps, configDir } = await setup();
+    const serve = createArtworkServer(deps);
+    await mkdir(path.join(configDir, 'grid'), { recursive: true });
+    await writeFile(path.join(configDir, 'grid', '5p.png'), 'PNG');
+
+    const ok = await serve('steam-manager-art://grid/5p.png?v=1');
+    expect(ok).toMatchObject({ status: 200, contentType: 'image/png' });
+    expect((ok as { data: Buffer }).data.toString()).toBe('PNG');
+    expect(await serve('steam-manager-art://grid/6p.png')).toEqual({ status: 404 });
+    expect(await serve('steam-manager-art://grid/..%2Fsecret.png')).toEqual({ status: 400 });
+    expect(await serve('steam-manager-art://grid/notes.txt')).toEqual({ status: 400 });
+    expect(await serve('steam-manager-art://other/5p.png')).toEqual({ status: 400 });
+    expect(await serve('https://grid/5p.png')).toEqual({ status: 400 });
+    expect(await serve('steam-manager-art://grid/%E0%A4%A')).toEqual({ status: 400 });
+    expect(await serve('not a url')).toEqual({ status: 400 });
+  });
+
+  it('says not found when Steam cannot be found', async () => {
+    const { deps } = await setup();
+    expect(await createArtworkServer({ ...deps, home: await makeTempDir() })('steam-manager-art://grid/5p.png')).toEqual({ status: 404 });
   });
 });
