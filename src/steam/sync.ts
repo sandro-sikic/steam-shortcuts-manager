@@ -1,4 +1,3 @@
-import type { Game } from '../types.js';
 import type { VdfMap, VdfValue } from '../vdf/types.js';
 import {
   buildShortcut,
@@ -10,6 +9,17 @@ import {
   shortcutTags,
   shortcutTitle,
 } from './shortcuts.js';
+
+/** A game resolved to what its Steam shortcut should run. */
+export interface SyncGame {
+  /** Display name of the store; used as the tag/collection. */
+  store: string;
+  title: string;
+  installed: boolean;
+  exe: string;
+  startDir?: string;
+  launchOptions?: string;
+}
 
 export interface SyncItem {
   appId: number;
@@ -43,7 +53,7 @@ function describe(appId: number, title: string, store: string): SyncItem {
  * Pure planner: given the current shortcuts and the installed games, computes the new list
  * of shortcuts. Only shortcuts carrying MANAGED_TAG are ever modified or removed.
  */
-export function planSync(existing: VdfMap[], games: Game[], options: SyncOptions): SyncResult {
+export function planSync(existing: VdfMap[], games: SyncGame[], options: SyncOptions): SyncResult {
   const result: SyncResult = { entries: [], added: [], updated: [], unchanged: [], removed: [], skipped: [] };
   const byId = new Map(existing.map((entry) => [shortcutAppId(entry), entry]));
   const handled = new Set<number>();

@@ -1,4 +1,26 @@
-/** A game discovered by a provider (Epic, GOG, Ubisoft, ...). */
+/** Start a program directly. */
+export interface ExeLaunch {
+  kind: 'exe';
+  /** Absolute path of the executable. */
+  exe: string;
+  startDir?: string;
+  args?: string;
+}
+
+/**
+ * Open a launcher URI (e.g. `uplay://launch/...`). Steam cannot start a URI itself, so a
+ * wrapper script is generated for it.
+ */
+export interface UriLaunch {
+  kind: 'uri';
+  uri: string;
+  /** Process name of the game, so the wrapper can wait for it and Steam sees the game as running. */
+  waitFor?: string;
+}
+
+export type LaunchSpec = ExeLaunch | UriLaunch;
+
+/** An installed game found by an integration. */
 export interface Game {
   /** Display name of the store; used as the Steam tag/collection, e.g. "Epic Games". */
   store: string;
@@ -6,14 +28,5 @@ export interface Game {
   id: string;
   title: string;
   installed: boolean;
-  /** Absolute path of the executable (or launcher binary) Steam should start. */
-  exe: string;
-  startDir?: string;
-  launchOptions?: string;
-}
-
-/** A source of games. Implementations (login + library) are added later. */
-export interface Provider {
-  readonly name: string;
-  listGames(): Promise<Game[]>;
+  launch: LaunchSpec;
 }

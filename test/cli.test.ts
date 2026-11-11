@@ -1,11 +1,12 @@
-import { mkdir, readdir } from 'node:fs/promises';
+import { mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppContext } from '../src/app.js';
 import { createProgram } from '../src/cli.js';
 import { buildShortcut, computeAppId, MANAGED_TAG } from '../src/steam/shortcuts.js';
 import { loadShortcuts, saveShortcuts } from '../src/steam/store.js';
-import type { Game, Provider } from '../src/types.js';
+import type { Integration } from '../src/integrations/types.js';
+import type { Game } from '../src/types.js';
 import { cleanupTempDirs, fakeFetch, makeSteamRoot, makeTempDir } from './helpers.js';
 
 afterEach(cleanupTempDirs);
@@ -22,27 +23,34 @@ const artRoutes = {
   'https://c/h.png': { body: Buffer.from('H') },
 };
 
-const fortnite: Game = { store: 'Epic Games', id: 'fn', title: 'Fortnite', installed: true, exe: '/games/fortnite' };
+const fortnite: Game = { store: 'Epic Games', id: 'fn', title: 'Fortnite', installed: true, launch: { kind: 'exe', exe: '/games/fortnite' } };
 
-async function setup(options: { running?: boolean; providers?: Provider[]; env?: NodeJS.ProcessEnv } = {}) {
+async function setup(options: { running?: boolean; integrations?: Integration[]; env?: NodeJS.ProcessEnv; platform?: NodeJS.Platform } = {}) {
   const root = await makeSteamRoot(['1']);
+  const home = await makeTempDir();
   const logs: string[] = [];
   const fetchFn = fakeFetch(artRoutes);
   const ctx: AppContext = {
-    platform: 'linux',
-    home: '/nonexistent-home',
+    platform: options.platform ?? 'linux',
+    home,
     env: options.env ?? {},
     runner: async () => (options.running ? '999\n' : ''),
     fetchFn,
-    providers: options.providers ?? [],
+    integrations: options.integrations ?? [],
     log: (message) => logs.push(message),
   };
   const configDir = path.join(root, 'userdata', '1', 'config');
   const run = (...args: string[]) => createProgram(ctx).parseAsync(['node', 'steam-manager', '--steam-dir', root, ...args]);
-  return { root, configDir, gridDir: path.join(configDir, 'grid'), logs, fetchFn, ctx, run };
+  return { root, home, configDir, gridDir: path.join(configDir, 'grid'), logs, fetchFn, ctx, run };
 }
 
-const provider = (games: Game[]): Provider => ({ name: 'fake', listGames: async () => games });
+const integration = (games: Game[], over: Partial<Integration> = {}): Integration => ({
+  id: 'fake',
+  label: 'Fake',
+  platforms: ['linux', 'win32', 'darwin'],
+  scan: async () => games,
+  ...over,
+});
 
 describe('list', () => {
   it('reports when there are no shortcuts', async () => {
@@ -68,6 +76,20 @@ describe('list', () => {
     const { ctx, logs } = await setup();
     await createProgram({ ...ctx, home }).parseAsync(['node', 'steam-manager', 'list']);
     expect(logs).toEqual(['No non-Steam shortcuts found.']);
+  });
+});
+
+describe('integrations', () => {
+  it('lists the integrations available on this platform', async () => {
+    const { run, logs } = await setup({ integrations: [integration([]), integration([], { id: 'win', label: 'Windows Only', platforms: ['win32'] })] });
+    await run('integrations');
+    expect(logs).toEqual(['fake  Fake']);
+  });
+
+  it('says so when there are none', async () => {
+    const { run, logs } = await setup();
+    await run('integrations');
+    expect(logs).toEqual(['No integrations are available on this platform.']);
   });
 });
 
@@ -149,19 +171,58 @@ describe('add', () => {
 });
 
 describe('sync', () => {
-  it('explains that there is nothing to sync without providers', async () => {
+  it('explains that there is nothing to sync without integrations', async () => {
     const { run, logs } = await setup();
     await run('sync');
-    expect(logs).toEqual(['No providers are configured yet, so there is nothing to sync. Use "add" to add a game by hand.']);
+    expect(logs).toEqual(['No integrations are available on this platform, so there is nothing to sync. Use "add" to add a game by hand.']);
+  });
+
+  it('ignores integrations that do not exist on this platform', async () => {
+    const { run, logs } = await setup({ integrations: [integration([fortnite], { platforms: ['win32'] })] });
+    await run('sync');
+    expect(logs[0]).toContain('No integrations are available');
+  });
+
+  it('limits the sync with --only and rejects unknown ids', async () => {
+    const other: Game = { ...fortnite, id: 'rl', title: 'Rocket League', launch: { kind: 'exe', exe: '/games/rl' } };
+    const { run, configDir } = await setup({ integrations: [integration([fortnite]), integration([other], { id: 'fake2' })] });
+    await run('sync', '--no-artwork', '--only', 'fake2');
+    expect((await loadShortcuts(configDir)).map((e) => e.get('AppName'))).toEqual(['Rocket League']);
+    await expect(run('sync', '--only', 'nope')).rejects.toThrow('Unknown or unavailable integration "nope". Available here: fake, fake2');
+  });
+
+  it('reports a failing integration and carries on with the others', async () => {
+    const broken = integration([], { id: 'broken', label: 'Broken', scan: async () => { throw new Error('boom'); } });
+    const { run, logs, configDir } = await setup({ integrations: [broken, integration([fortnite])] });
+    await run('sync', '--no-artwork');
+    expect(logs[0]).toBe('Could not scan Broken: boom');
+    expect(await loadShortcuts(configDir)).toHaveLength(1);
+  });
+
+  it('generates a wrapper script for URI launches and points the shortcut at it', async () => {
+    const uriGame: Game = { store: 'Ubisoft Connect', id: '720', title: 'Anno', installed: true, launch: { kind: 'uri', uri: 'uplay://launch/720/0' } };
+    const { run, home, configDir } = await setup({ integrations: [integration([uriGame])] });
+    await run('sync', '--no-artwork');
+    const script = path.join(home, '.config', 'steam-manager', 'launchers', 'Ubisoft_Connect-720.sh');
+    const [entry] = await loadShortcuts(configDir);
+    expect(entry?.get('Exe')).toBe(`"${script}"`);
+    expect(await readFile(script, 'utf8')).toContain("xdg-open 'uplay://launch/720/0'");
+  });
+
+  it('does not write wrapper scripts on a dry run', async () => {
+    const uriGame: Game = { store: 'Ubisoft Connect', id: '720', title: 'Anno', installed: true, launch: { kind: 'uri', uri: 'uplay://launch/720/0' } };
+    const { run, home } = await setup({ integrations: [integration([uriGame])] });
+    await run('sync', '--dry-run');
+    await expect(readdir(path.join(home, '.config'))).rejects.toThrow();
   });
 
   it('syncs games from all providers, then updates and prunes on later runs', async () => {
-    const other: Game = { ...fortnite, id: 'rl', title: 'Rocket League', exe: '/games/rl' };
-    const { run, ctx, logs, configDir } = await setup({ providers: [provider([fortnite]), provider([other])] });
+    const other: Game = { ...fortnite, id: 'rl', title: 'Rocket League', launch: { kind: 'exe', exe: '/games/rl' } };
+    const { run, ctx, logs, configDir } = await setup({ integrations: [integration([fortnite]), integration([other], { id: 'fake2' })] });
     await run('sync', '--no-artwork');
     expect((await loadShortcuts(configDir)).map((e) => e.get('AppName'))).toEqual(['Fortnite', 'Rocket League']);
 
-    ctx.providers = [provider([{ ...fortnite, store: 'GOG' }])];
+    ctx.integrations = [integration([{ ...fortnite, store: 'GOG' }])];
     logs.length = 0;
     await run('sync', '--no-artwork', '--prune');
     expect(logs).toEqual([
@@ -174,14 +235,14 @@ describe('sync', () => {
   });
 
   it('lists pruned shortcuts without a store tag by title alone', async () => {
-    const { run, logs, configDir } = await setup({ providers: [provider([])] });
+    const { run, logs, configDir } = await setup({ integrations: [integration([])] });
     await saveShortcuts(configDir, [buildShortcut({ title: 'Tagless', exe: '/t', tags: [MANAGED_TAG] })]);
     await run('sync', '--prune');
     expect(logs.slice(0, 2)).toEqual(['Removed:', '  Tagless']);
   });
 
   it('reports conflicts and nothing else to do', async () => {
-    const { run, logs, configDir } = await setup({ providers: [provider([fortnite])] });
+    const { run, logs, configDir } = await setup({ integrations: [integration([fortnite])] });
     await saveShortcuts(configDir, [buildShortcut({ title: 'Fortnite', exe: '/games/fortnite', tags: [] })]);
     await run('sync');
     expect(logs).toEqual([
@@ -192,14 +253,14 @@ describe('sync', () => {
   });
 
   it('does nothing quietly when providers return no installed games', async () => {
-    const { run, logs, fetchFn } = await setup({ providers: [provider([])], env: { STEAMGRIDDB_API_KEY: 'k' } });
+    const { run, logs, fetchFn } = await setup({ integrations: [integration([])], env: { STEAMGRIDDB_API_KEY: 'k' } });
     await run('sync');
     expect(logs).toEqual(['0 added, 0 updated, 0 removed, 0 unchanged']);
     expect(fetchFn.requests).toHaveLength(0);
   });
 
   it('downloads artwork for synced games', async () => {
-    const { run, logs } = await setup({ providers: [provider([fortnite])], env: { STEAMGRIDDB_API_KEY: 'k' } });
+    const { run, logs } = await setup({ integrations: [integration([fortnite])], env: { STEAMGRIDDB_API_KEY: 'k' } });
     await run('sync');
     expect(logs.at(-1)).toBe('  Fortnite (artwork: 2 saved, 0 already present, 3 not found, 0 failed)');
   });

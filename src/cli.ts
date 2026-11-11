@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import {
   runAdd,
+  runIntegrations,
   runList,
   runSync,
   type AddCommandOptions,
@@ -26,8 +27,16 @@ export function createProgram(ctx: AppContext): Command {
     });
 
   program
+    .command('integrations')
+    .description('list the launcher integrations available on this platform')
+    .action(async () => {
+      await runIntegrations(ctx);
+    });
+
+  program
     .command('sync')
-    .description('sync installed games from all providers into Steam')
+    .description('sync installed games from the launcher integrations into Steam')
+    .option('--only <ids>', 'comma-separated integration ids to sync (see "integrations")', (value) => value.split(','))
     .option('--prune', 'remove managed shortcuts for games that are no longer installed')
     .option('--dry-run', 'show what would change without writing anything')
     .option('--no-artwork', 'do not download artwork')

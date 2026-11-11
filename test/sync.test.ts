@@ -1,22 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { buildShortcut, getField, MANAGED_TAG, setField, shortcutAppId, shortcutTags } from '../src/steam/shortcuts.js';
-import { planSync } from '../src/steam/sync.js';
-import type { Game } from '../src/types.js';
+import { planSync, type SyncGame } from '../src/steam/sync.js';
 
-const game = (over: Partial<Game> = {}): Game => ({
+const game = (over: Partial<SyncGame> = {}): SyncGame => ({
   store: 'Epic Games',
-  id: 'fn',
   title: 'Fortnite',
   installed: true,
   exe: '/games/fortnite',
   ...over,
 });
 
-const managed = (g: Game) => buildShortcut({ title: g.title, exe: g.exe, startDir: g.startDir, launchOptions: g.launchOptions, tags: [g.store, MANAGED_TAG] });
+const managed = (g: SyncGame) => buildShortcut({ title: g.title, exe: g.exe, startDir: g.startDir, launchOptions: g.launchOptions, tags: [g.store, MANAGED_TAG] });
 
 describe('planSync', () => {
   it('adds installed games and ignores uninstalled ones', () => {
-    const result = planSync([], [game(), game({ id: 'x', title: 'Gone', installed: false })], { prune: false });
+    const result = planSync([], [game(), game({ title: 'Gone', installed: false })], { prune: false });
     expect(result.added).toEqual([{ appId: expect.any(Number), title: 'Fortnite', store: 'Epic Games' }]);
     expect(result.entries).toHaveLength(1);
     expect(shortcutTags(result.entries[0]!)).toEqual(['Epic Games', MANAGED_TAG]);
@@ -55,7 +53,7 @@ describe('planSync', () => {
   });
 
   it('skips duplicate games', () => {
-    const result = planSync([], [game(), game({ id: 'dup' })], { prune: false });
+    const result = planSync([], [game(), game()], { prune: false });
     expect(result.added).toHaveLength(1);
     expect(result.skipped).toHaveLength(1);
   });

@@ -1,11 +1,14 @@
 import { installArtwork, type ArtworkOutcome } from './artwork/install.js';
 import { SteamGridDbClient, type FetchLike } from './artwork/steamgriddb.js';
+import { selectIntegrations, availableIntegrations } from './integrations/index.js';
+import type { Integration } from './integrations/types.js';
+import { resolveTarget, wrapperDir } from './launcher/wrapper.js';
 import { findSteamRoot, resolveUser, type SteamUser } from './steam/locate.js';
 import { isSteamRunning, type Runner } from './steam/running.js';
 import { isManaged, shortcutAppId, shortcutTags, shortcutTitle } from './steam/shortcuts.js';
 import { loadShortcuts, saveShortcuts } from './steam/store.js';
-import { planSync, type SyncItem, type SyncResult } from './steam/sync.js';
-import type { Game, Provider } from './types.js';
+import { planSync, type SyncGame, type SyncItem, type SyncResult } from './steam/sync.js';
+import type { Game } from './types.js';
 
 /** Everything with side effects, injected so the commands can be tested without a real Steam. */
 export interface AppContext {
@@ -14,7 +17,7 @@ export interface AppContext {
   env: NodeJS.ProcessEnv;
   runner: Runner;
   fetchFn: FetchLike;
-  providers: Provider[];
+  integrations: Integration[];
   log: (message: string) => void;
 }
 
@@ -26,6 +29,8 @@ export interface GlobalOptions {
 }
 
 export interface SyncCommandOptions {
+  /** Limit the sync to these integration ids. */
+  only?: string[];
   prune?: boolean;
   dryRun?: boolean;
   artwork?: boolean;
@@ -99,6 +104,17 @@ function report(ctx: AppContext, result: SyncResult, dryRun: boolean): void {
   ctx.log(`${prefix}${result.added.length} added, ${result.updated.length} updated, ${result.removed.length} removed, ${result.unchanged.length} unchanged`);
 }
 
+/** Resolves each game's launch spec to a shortcut target, generating wrapper scripts as needed. */
+async function resolveGames(ctx: AppContext, games: Game[], write: boolean): Promise<SyncGame[]> {
+  const dir = wrapperDir(ctx.platform, ctx.home, ctx.env);
+  return Promise.all(
+    games.map(async (game) => {
+      const target = await resolveTarget(game, { platform: ctx.platform, dir, write });
+      return { store: game.store, title: game.title, installed: game.installed, ...target };
+    }),
+  );
+}
+
 /** Shared tail of `sync` and `add`: plan, report, write, then fetch artwork. */
 async function applyGames(
   ctx: AppContext,
@@ -106,7 +122,8 @@ async function applyGames(
   options: GlobalOptions & SyncCommandOptions,
 ): Promise<SyncResult> {
   const user = await openUser(ctx, options);
-  const result = planSync(await loadShortcuts(user.configDir), games, { prune: Boolean(options.prune) });
+  const resolved = await resolveGames(ctx, games, !options.dryRun);
+  const result = planSync(await loadShortcuts(user.configDir), resolved, { prune: Boolean(options.prune) });
   report(ctx, result, Boolean(options.dryRun));
   if (options.dryRun) return result;
 
@@ -121,12 +138,30 @@ async function applyGames(
 }
 
 export async function runSync(ctx: AppContext, options: GlobalOptions & SyncCommandOptions): Promise<void> {
-  if (ctx.providers.length === 0) {
-    ctx.log('No providers are configured yet, so there is nothing to sync. Use "add" to add a game by hand.');
+  const selected = selectIntegrations(ctx.platform, options.only, ctx.integrations);
+  if (selected.length === 0) {
+    ctx.log('No integrations are available on this platform, so there is nothing to sync. Use "add" to add a game by hand.');
     return;
   }
-  const games = (await Promise.all(ctx.providers.map((provider) => provider.listGames()))).flat();
+  const scanContext = { platform: ctx.platform, home: ctx.home, env: ctx.env, run: ctx.runner };
+  const games: Game[] = [];
+  for (const integration of selected) {
+    try {
+      games.push(...(await integration.scan(scanContext)));
+    } catch (error) {
+      ctx.log(`Could not scan ${integration.label}: ${(error as Error).message}`);
+    }
+  }
   await applyGames(ctx, games, options);
+}
+
+export async function runIntegrations(ctx: AppContext): Promise<void> {
+  const available = availableIntegrations(ctx.platform, ctx.integrations);
+  if (available.length === 0) {
+    ctx.log('No integrations are available on this platform.');
+    return;
+  }
+  for (const integration of available) ctx.log(`${integration.id}  ${integration.label}`);
 }
 
 export async function runAdd(ctx: AppContext, options: GlobalOptions & AddCommandOptions): Promise<void> {
@@ -135,9 +170,7 @@ export async function runAdd(ctx: AppContext, options: GlobalOptions & AddComman
     id: options.title,
     title: options.title,
     installed: true,
-    exe: options.exe,
-    startDir: options.startDir,
-    launchOptions: options.launchOptions,
+    launch: { kind: 'exe', exe: options.exe, startDir: options.startDir, args: options.launchOptions },
   };
   const result = await applyGames(ctx, [game], options);
   if (result.skipped.length > 0) {

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import os from 'node:os';
 import { createProgram } from './cli.js';
+import { integrations } from './integrations/index.js';
 import { defaultRunner } from './steam/running.js';
 
 const program = createProgram({
@@ -9,7 +10,7 @@ const program = createProgram({
   env: process.env,
   runner: defaultRunner,
   fetchFn: fetch,
-  providers: [],
+  integrations,
   log: (message) => console.log(message),
 });
 
