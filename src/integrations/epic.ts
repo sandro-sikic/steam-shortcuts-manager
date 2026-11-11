@@ -67,8 +67,8 @@ function installRoots(ctx: ScanContext): string[] {
     const folder = ctx.env[name];
     if (folder) roots.add(path.join(folder, 'Epic Games'));
   }
-  for (let code = 'C'.charCodeAt(0); code <= 'Z'.charCodeAt(0); code++) {
-    const drive = `${String.fromCharCode(code)}:\\`;
+  const drives = ctx.drives ?? Array.from({ length: 24 }, (_, i) => `${String.fromCharCode(67 + i)}:\\`);
+  for (const drive of drives) {
     roots.add(path.join(drive, 'Program Files', 'Epic Games'));
     roots.add(path.join(drive, 'Epic Games'));
   }

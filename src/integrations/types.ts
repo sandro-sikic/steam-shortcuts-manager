@@ -18,6 +18,8 @@ export interface ScanContext {
   env: NodeJS.ProcessEnv;
   /** Runs a command and returns its stdout ('' on failure), e.g. `reg query`. */
   run: Runner;
+  /** Drive roots to look for games on (Windows), e.g. `['C:\\']`. Defaults to C: through Z:; tests set `[]`. */
+  drives?: string[];
   options?: ScanOptions;
 }
 

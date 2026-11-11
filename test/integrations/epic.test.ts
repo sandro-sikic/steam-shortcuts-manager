@@ -22,6 +22,7 @@ async function setup(platform: NodeJS.Platform, items: Record<string, string | o
     home: root,
     env: platform === 'win32' ? { ProgramData: root } : {},
     run: async () => '',
+    drives: [],
   };
   return ctx;
 }
@@ -44,7 +45,7 @@ describe('epic integration', () => {
   it('returns [] when the launcher is absent', async () => {
     const root = await makeTempDir();
     expect(await epicIntegration.scan({ platform: 'darwin', home: root, env: {}, run: async () => '' })).toEqual([]);
-    expect(await epicIntegration.scan({ platform: 'win32', home: root, env: {}, run: async () => '' })).toEqual([]);
+    expect(await epicIntegration.scan({ platform: 'win32', home: root, env: {}, run: async () => '', drives: [] })).toEqual([]);
   });
 
   it('launches through the launcher URI and waits for the executable', async () => {
@@ -119,7 +120,7 @@ describe('epic integration', () => {
 
   it('defaults ProgramData when the environment lacks it', async () => {
     const root = await makeTempDir();
-    const games = await epicIntegration.scan({ platform: 'win32', home: root, env: {}, run: async () => '' });
+    const games = await epicIntegration.scan({ platform: 'win32', home: root, env: {}, run: async () => '', drives: [] });
     expect(games).toEqual([]);
   });
 
@@ -155,7 +156,7 @@ describe('epic integration', () => {
         await mkdir(path.join(root, 'Epic', 'EpicGamesLauncher', 'Data', 'Catalog'), { recursive: true });
         await writeFile(path.join(root, 'Epic', 'EpicGamesLauncher', 'Data', 'Catalog', 'catcache.bin'), catcache);
       }
-      const ctx: ScanContext = { platform: 'win32', home: root, env: { ProgramData: root, ProgramFiles: programFiles }, run: async () => '' };
+      const ctx: ScanContext = { platform: 'win32', home: root, env: { ProgramData: root, ProgramFiles: programFiles }, run: async () => '', drives: [] };
       return { ctx, programFiles };
     }
 
@@ -212,6 +213,14 @@ describe('epic integration', () => {
         expect(found.map((g) => g.id)).toEqual(['Else']);
       }
       expect(await epicIntegration.scan({ ...ctx, env: { ProgramData: ctx.home } })).toEqual([]);
+      expect((await epicIntegration.scan({ ...ctx, env: { ProgramData: ctx.home }, drives: [other] })).map((g) => g.id)).toEqual(['Else']);
+    });
+
+    it('looks on drives C: through Z: when no drives are given', async () => {
+      const { ctx } = await machine({});
+      const { drives, ...unset } = ctx;
+      expect(drives).toEqual([]);
+      expect(await epicIntegration.scan({ ...unset, env: { ProgramData: ctx.home } })).toBeInstanceOf(Array);
     });
   });
 });
