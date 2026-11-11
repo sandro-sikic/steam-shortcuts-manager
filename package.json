@@ -98,5 +98,6 @@
     "portable": {
       "artifactName": "${name}-${version}-win-${arch}-portable.${ext}"
     }
-  }
+  },
+  "homepage": "https://example.com/steam-manager"
 }

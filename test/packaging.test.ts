@@ -21,6 +21,10 @@ describe('packaging', () => {
     expect(pkg.main).toBe('dist/electron/main.js');
   });
 
+  it('has a homepage, which the deb package requires', () => {
+    expect(pkg.homepage).toMatch(/^https?:\/\//);
+  });
+
   it('targets an installer and a portable build for Windows, and an AppImage and a deb for Linux', () => {
     expect(pkg.build.win.target.map((t: { target: string }) => t.target)).toEqual(['nsis', 'portable']);
     expect(pkg.build.linux.target).toEqual(['AppImage', 'deb']);

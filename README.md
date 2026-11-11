@@ -196,7 +196,8 @@ bootstrap code verified by launching the app), `npm run typecheck`.
 - `npm run pack` builds an unpacked app in `release/`; `npm run dist:linux` makes an AppImage and a deb,
   `npm run dist:win` an installer and a portable `.exe`, and `npm run dist` both. Nothing is published by these scripts.
   Building the Windows packages on Linux needs Wine, so build them on Windows or let CI do it. The deb needs a project
-  homepage: set `homepage` in `package.json` (CI sets it to the repository).
+  homepage: `package.json` has an example one (`https://example.com/steam-manager`) so local builds pass; CI replaces it with
+  the repository URL. Change it to your real site when you have one.
 - `.github/workflows/release.yml` runs on every push to `main`: typecheck and tests with 100% coverage, then the Linux and
   Windows packages on their own runners, then a GitHub release named `v<commits>` with the files attached.
   **Versions:** the version is the number of commits on `main`, set by CI. Installers need a semver, so files are named
