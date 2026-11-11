@@ -16,7 +16,8 @@
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "start": "npm run build && npm run ui:build && electron .",
-    "dev": "npm run build && concurrently -k -n ui,app \"vite\" \"wait-on tcp:5173 && electron . --dev\""
+    "dev": "npm run build && concurrently -k -n ui,app \"vite\" \"wait-on tcp:5173 && electron . --dev\"",
+    "ui:dev": "vite"
   },
   "license": "MIT",
   "devDependencies": {
