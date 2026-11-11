@@ -34,7 +34,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
 
     --bg: #090c12;
@@ -58,6 +58,31 @@
     --glow-b: rgba(108, 182, 255, 0.09);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.35);
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #090c12;
+  --surface: #111622;
+  --raised: #182031;
+  --line: #212a3c;
+  --line-strong: #303b52;
+  --text: #e8ecf5;
+  --muted: #8c98ae;
+
+  --accent: #ff8a3d;
+  --accent-hover: #ff9d5c;
+  --accent-ink: #1c0e03;
+
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --info: #6cb6ff;
+
+  --glow-a: rgba(255, 138, 61, 0.1);
+  --glow-b: rgba(108, 182, 255, 0.09);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.35);
 }
 
 * {
@@ -183,6 +208,11 @@ code {
   color: var(--muted);
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s, transform 0.15s;
+}
+
+.icon-button.active {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .icon-button:hover {
@@ -330,7 +360,7 @@ code {
   margin: 0;
   padding: 0;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(var(--card-min, 148px), 1fr));
   gap: 14px;
 }
 
@@ -564,7 +594,8 @@ code {
 
 .segmented {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   gap: 4px;
   padding: 4px;
   border-radius: 11px;
@@ -948,4 +979,260 @@ code {
 .dupes ul {
   margin: 8px 0 0;
   padding-left: 18px;
+}
+
+/* ---- Forms (settings) ---- */
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.field > .label,
+.field > label {
+  font-weight: 600;
+}
+
+.input {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--text);
+  font: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.input:focus-visible {
+  outline: 0;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.button:hover:not(:disabled) {
+  background: var(--raised);
+}
+
+.button.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.button.danger {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, transparent);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.row > .input {
+  flex: 1 1 200px;
+  width: auto;
+}
+
+/* One-line feedback under a control: .status.ok, .status.error */
+.status {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.status.ok {
+  color: var(--ok);
+}
+
+.status.error {
+  color: var(--danger);
+}
+
+.help {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+/* ---- Card size (settings) ---- */
+
+:root[data-card='small'] {
+  --card-min: 120px;
+}
+
+:root[data-card='large'] {
+  --card-min: 184px;
+}
+
+/* ---- Settings page ---- */
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.settings {
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.settings-nav button {
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.settings-nav button:hover {
+  color: var(--text);
+}
+
+.settings-nav button[aria-current='page'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--line-strong);
+}
+
+.settings-section {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
+@media (max-width: 760px) {
+  .settings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-nav {
+    position: static;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    overflow-x: auto;
+  }
+}
+
+fieldset.field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+fieldset.field legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-weight: 600;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 3px 0;
+  cursor: pointer;
+}
+
+.settings-page {
+  display: grid;
+  gap: 18px;
+}
+
+.settings-section > h2 {
+  margin-bottom: -8px;
+}
+
+.settings-section dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 22px;
+  margin: 0;
+}
+
+.settings-section dt {
+  color: var(--muted);
+}
+
+.settings-section dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.settings-section h3 {
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+/* The small x on a chip that removes the entry. */
+.chip button {
+  width: 16px;
+  height: 16px;
+  margin: 0 -3px 0 5px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  vertical-align: 1px;
+  cursor: pointer;
+}
+
+.chip button:hover {
+  background: var(--line-strong);
+  color: var(--text);
 }

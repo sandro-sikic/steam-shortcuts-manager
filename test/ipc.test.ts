@@ -11,6 +11,17 @@ function fakeApi(): { [K in keyof SteamManagerApi]: ReturnType<typeof vi.fn> } {
     sync: vi.fn(async () => 'sync'),
     games: vi.fn(async () => 'games'),
     setExcluded: vi.fn(async () => 'setExcluded'),
+    settings: vi.fn(async () => 'settings'),
+    updateSettings: vi.fn(async () => 'updateSettings'),
+    resetSettings: vi.fn(async () => 'resetSettings'),
+    lists: vi.fn(async () => 'lists'),
+    setLists: vi.fn(async () => 'setLists'),
+    apiKeyStatus: vi.fn(async () => 'apiKeyStatus'),
+    setApiKey: vi.fn(async () => 'setApiKey'),
+    testApiKey: vi.fn(async () => 'testApiKey'),
+    steamAccounts: vi.fn(async () => 'steamAccounts'),
+    about: vi.fn(async () => 'about'),
+    openConfigFolder: vi.fn(async () => 'openConfigFolder'),
   };
 }
 

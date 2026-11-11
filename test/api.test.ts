@@ -5,7 +5,8 @@ import { createApi, parseGamesRequest, parseSyncRequest, systemDeps, type ApiDep
 import { integrations } from '../src/integrations/index.js';
 import type { Integration } from '../src/integrations/types.js';
 import { buildShortcut, MANAGED_TAG } from '../src/steam/shortcuts.js';
-import { saveShortcuts } from '../src/steam/store.js';
+import { saveShortcuts, loadShortcuts } from '../src/steam/store.js';
+import type { SecretStore } from '../src/secrets.js';
 import type { Game } from '../src/types.js';
 import { cleanupTempDirs, desktopEnv, fakeFetch, makeTempDir } from './helpers.js';
 
@@ -21,7 +22,22 @@ const fake = (over: Partial<Integration> = {}): Integration => ({
 });
 
 /** A home directory with a Steam installation in the usual Linux place. */
-async function setup(options: { running?: boolean; users?: string[]; env?: NodeJS.ProcessEnv; integrations?: Integration[]; platform?: NodeJS.Platform } = {}) {
+/** An in-memory secret store. */
+function memorySecrets(available = true): SecretStore & { data: Map<string, string> } {
+  const data = new Map<string, string>();
+  return {
+    data,
+    available: async () => available,
+    get: async (name) => (available ? data.get(name) : undefined),
+    set: async (name, value) => {
+      if (!available) throw new Error('Secure storage is not available on this system. Set the STEAMGRIDDB_API_KEY environment variable instead.');
+      data.set(name, value);
+    },
+    remove: async (name) => void data.delete(name),
+  };
+}
+
+async function setup(options: { running?: boolean; users?: string[]; env?: NodeJS.ProcessEnv; integrations?: Integration[]; platform?: NodeJS.Platform; extra?: Partial<ApiDeps> } = {}) {
   const home = await makeTempDir();
   const steam = path.join(home, '.steam', 'steam');
   for (const id of options.users ?? ['1']) await mkdir(path.join(steam, 'userdata', id, 'config'), { recursive: true });
@@ -32,6 +48,7 @@ async function setup(options: { running?: boolean; users?: string[]; env?: NodeJ
     runner: async () => (options.running ? '123\n' : ''),
     fetchFn: fakeFetch({}),
     integrations: options.integrations ?? [fake()],
+    ...options.extra,
   };
   return { deps, api: createApi(deps), steam, configDir: path.join(steam, 'userdata', '1', 'config'), home };
 }
@@ -110,7 +127,7 @@ describe('api.shortcuts', () => {
 describe('api.integrations', () => {
   it('lists the integrations available on this platform', async () => {
     const { api } = await setup({ integrations: [fake(), fake({ id: 'win', label: 'Windows Only', platforms: ['win32'] })] });
-    expect(await api.integrations()).toEqual([{ id: 'fake', label: 'Fake Launcher' }]);
+    expect(await api.integrations()).toEqual([{ id: 'fake', label: 'Fake Launcher', enabled: true }]);
   });
 });
 
@@ -292,5 +309,208 @@ describe('api.setExcluded', () => {
     await api.setExcluded(['a:1'], 'yes' as never);
     const file = path.join(home, '.config', 'steam-manager', 'config.json');
     expect(JSON.parse(await readFile(file, 'utf8')).exclude).toEqual([]);
+  });
+});
+
+describe('api settings', () => {
+  it('reads, updates and resets settings, saving them in config.json', async () => {
+    const { api, home } = await setup();
+    expect((await api.settings()).ui.theme).toBe('system');
+    const updated = await api.updateSettings({ ui: { theme: 'dark' }, sync: { prune: true } });
+    expect(updated.ui.theme).toBe('dark');
+    expect((await api.settings()).sync.prune).toBe(true);
+    const file = JSON.parse(await readFile(path.join(home, '.config', 'steam-manager', 'config.json'), 'utf8'));
+    expect(file.settings.ui.theme).toBe('dark');
+    expect((await api.resetSettings()).ui.theme).toBe('system');
+  });
+
+  it('rejects invalid settings', async () => {
+    const { api } = await setup();
+    await expect(api.updateSettings({ ui: { theme: 'neon' } } as never)).rejects.toThrow('ui.theme must be one of');
+  });
+});
+
+describe('api lists', () => {
+  it('reads and replaces the allow, deny and exclude lists, trimming and removing duplicates', async () => {
+    const { api } = await setup();
+    expect(await api.lists()).toEqual({ allow: [], deny: [], exclude: [] });
+    expect(await api.setLists({ allow: [' Hades ', 'Hades', ''], deny: ['Tool'] })).toEqual({ allow: ['Hades'], deny: ['Tool'], exclude: [] });
+    expect(await api.setLists({ exclude: ['a:1'] })).toEqual({ allow: ['Hades'], deny: ['Tool'], exclude: ['a:1'] });
+    expect(await api.lists()).toEqual({ allow: ['Hades'], deny: ['Tool'], exclude: ['a:1'] });
+    expect(await api.setLists({})).toEqual({ allow: ['Hades'], deny: ['Tool'], exclude: ['a:1'] });
+  });
+
+  it('rejects invalid lists', async () => {
+    const { api } = await setup();
+    await expect(api.setLists(null as never)).rejects.toThrow('Invalid lists');
+    await expect(api.setLists({ allow: 'x' } as never)).rejects.toThrow('Invalid allow list');
+    await expect(api.setLists({ deny: [1] } as never)).rejects.toThrow('Invalid deny list');
+  });
+});
+
+describe('api key', () => {
+  const key = (api: ReturnType<typeof createApi>) => api.apiKeyStatus();
+
+  it('says where the key comes from, preferring the one saved in the app', async () => {
+    const secrets = memorySecrets();
+    const none = await setup({ extra: { secrets } });
+    expect(await key(none.api)).toEqual({ set: false, source: 'none', secureStorage: true });
+    const fromEnv = await setup({ env: { STEAMGRIDDB_API_KEY: 'envkey' }, extra: { secrets } });
+    expect(await key(fromEnv.api)).toEqual({ set: true, source: 'environment', secureStorage: true });
+    secrets.data.set('steamgriddb', 'saved');
+    expect(await key(fromEnv.api)).toEqual({ set: true, source: 'saved', secureStorage: true });
+  });
+
+  it('works without secure storage', async () => {
+    expect(await key((await setup()).api)).toEqual({ set: false, source: 'none', secureStorage: false });
+    expect(await key((await setup({ extra: { secrets: memorySecrets(false) } })).api)).toMatchObject({ secureStorage: false });
+  });
+
+  it('saves a key trimmed, and an empty key removes it', async () => {
+    const secrets = memorySecrets();
+    const { api } = await setup({ extra: { secrets } });
+    expect(await api.setApiKey('  abc123  ')).toEqual({ set: true, source: 'saved', secureStorage: true });
+    expect(secrets.data.get('steamgriddb')).toBe('abc123');
+    expect(await api.setApiKey('   ')).toEqual({ set: false, source: 'none', secureStorage: true });
+    expect(secrets.data.has('steamgriddb')).toBe(false);
+  });
+
+  it('explains when keys cannot be stored, and rejects bad input', async () => {
+    await expect((await setup()).api.setApiKey('x')).rejects.toThrow('Secure storage is not available');
+    await expect((await setup({ extra: { secrets: memorySecrets(false) } })).api.setApiKey('x')).rejects.toThrow('Secure storage is not available');
+    await expect((await setup({ extra: { secrets: memorySecrets() } })).api.setApiKey(5 as never)).rejects.toThrow('Invalid API key');
+  });
+
+  const API = 'https://www.steamgriddb.com/api/v2/search/autocomplete/Half-Life';
+  const withFetch = (routes: Parameters<typeof fakeFetch>[0], extra: Partial<ApiDeps> = {}, env: NodeJS.ProcessEnv = {}) => setup({ env, extra: { fetchFn: fakeFetch(routes), ...extra } });
+
+  it('tests a given key against SteamGridDB', async () => {
+    const fetchFn = fakeFetch({ [API]: { json: { success: true, data: [{ id: 1 }] } } });
+    const { api } = await setup({ extra: { fetchFn } });
+    expect(await api.testApiKey(' goodkey ')).toEqual({ ok: true, message: 'The key works.' });
+    expect(fetchFn.requests[0]?.auth).toBe('Bearer goodkey');
+  });
+
+  it('tests the key in use when none is given: saved first, then the environment', async () => {
+    const routes = { [API]: { json: { success: true, data: [] } } };
+    const saved = memorySecrets();
+    saved.data.set('steamgriddb', 'savedkey');
+    const first = await withFetch(routes, { secrets: saved }, { STEAMGRIDDB_API_KEY: 'envkey' });
+    expect((await first.api.testApiKey()).ok).toBe(true);
+    expect((first.deps.fetchFn as ReturnType<typeof fakeFetch>).requests[0]?.auth).toBe('Bearer savedkey');
+    const env = await withFetch(routes, {}, { STEAMGRIDDB_API_KEY: 'envkey' });
+    await env.api.testApiKey('   ');
+    expect((env.deps.fetchFn as ReturnType<typeof fakeFetch>).requests[0]?.auth).toBe('Bearer envkey');
+  });
+
+  it('says so when there is nothing to test, and explains rejected keys and other failures', async () => {
+    expect(await (await setup()).api.testApiKey()).toEqual({ ok: false, message: 'There is no API key to test.' });
+    expect(await (await withFetch({ [API]: { status: 401 } })).api.testApiKey('bad')).toEqual({ ok: false, message: 'SteamGridDB rejected this key.' });
+    expect((await (await withFetch({ [API]: { status: 403 } })).api.testApiKey('bad')).message).toBe('SteamGridDB rejected this key.');
+    expect((await (await withFetch({ [API]: { status: 500 } })).api.testApiKey('k')).message).toBe('SteamGridDB request failed with HTTP 500');
+  });
+
+  it('downloads artwork with the saved key when syncing', async () => {
+    const secrets = memorySecrets();
+    secrets.data.set('steamgriddb', 'savedkey');
+    const fetchFn = fakeFetch({ 'https://www.steamgriddb.com/api/v2/search/autocomplete/Fortnite': { json: { success: true, data: [] } } });
+    const { api } = await setup({ extra: { secrets, fetchFn } });
+    await api.sync({ dryRun: false, prune: false, includeMaybe: false, artwork: true });
+    expect(fetchFn.requests[0]).toEqual({ url: 'https://www.steamgriddb.com/api/v2/search/autocomplete/Fortnite', auth: 'Bearer savedkey' });
+  });
+});
+
+describe('api steam accounts and about', () => {
+  it('lists the accounts, from the saved Steam folder when there is one', async () => {
+    const { api, home } = await setup({ users: ['1', '2'] });
+    expect((await api.steamAccounts()).map((a) => a.accountId)).toEqual(['1', '2']);
+    const other = path.join(home, 'OtherSteam');
+    await mkdir(path.join(other, 'userdata', '9', 'config'), { recursive: true });
+    await api.updateSettings({ steam: { dir: other } });
+    expect((await api.steamAccounts()).map((a) => a.accountId)).toEqual(['9']);
+  });
+
+  it('lists none when Steam cannot be found', async () => {
+    const { deps } = await setup();
+    expect(await createApi({ ...deps, home: await makeTempDir() }).steamAccounts()).toEqual([]);
+  });
+
+  it('describes the app, the config file and Steam', async () => {
+    const { api, steam, home } = await setup({ extra: { version: '1.2.3', secrets: memorySecrets() } });
+    expect(await api.about()).toEqual({
+      version: '1.2.3',
+      platform: 'linux',
+      configFile: path.join(home, '.config', 'steam-manager', 'config.json'),
+      steamRoot: steam,
+      secureStorage: true,
+    });
+  });
+
+  it('copes without a version, without secure storage and without Steam', async () => {
+    const { deps } = await setup();
+    const about = await createApi({ ...deps, home: await makeTempDir() }).about();
+    expect(about).toMatchObject({ version: 'dev', secureStorage: false });
+    expect(about.steamRoot).toBeUndefined();
+  });
+});
+
+describe('api openConfigFolder', () => {
+  it('creates the folder if needed and opens it', async () => {
+    const opened: string[] = [];
+    const { api, home } = await setup({ extra: { openPath: async (folder) => void opened.push(folder) } });
+    await api.openConfigFolder();
+    expect(opened).toEqual([path.join(home, '.config', 'steam-manager')]);
+    await expect(readFile(path.join(opened[0] as string, 'nothing'))).rejects.toThrow();
+  });
+
+  it('says when opening folders is not possible', async () => {
+    await expect((await setup()).api.openConfigFolder()).rejects.toThrow('Opening folders is not available here.');
+  });
+});
+
+describe('settings take effect', () => {
+  const request = { dryRun: false, prune: false, includeMaybe: false, artwork: false };
+
+  it('uses the Steam folder and account from settings, for status, shortcuts and sync', async () => {
+    const { api, home } = await setup();
+    const custom = path.join(home, 'Games', 'Steam');
+    for (const id of ['5', '6']) await mkdir(path.join(custom, 'userdata', id, 'config'), { recursive: true });
+    await api.updateSettings({ steam: { dir: custom, user: '6' } });
+
+    expect(await api.status()).toMatchObject({ steamRoot: custom, accountId: '6' });
+    await api.sync(request);
+    expect((await loadShortcuts(path.join(custom, 'userdata', '6', 'config'))).map((e) => e.get('AppName'))).toEqual(['Fortnite']);
+    expect((await api.shortcuts()).map((s) => s.title)).toEqual(['Fortnite']);
+  });
+
+  it('lets Steam be running when the setting allows it', async () => {
+    const { api } = await setup({ running: true });
+    expect((await api.sync(request)).error).toContain('Steam is running');
+    await api.updateSettings({ steam: { allowRunning: true } });
+    const report = await api.sync(request);
+    expect(report.error).toBeUndefined();
+    expect(report.added).toHaveLength(1);
+  });
+
+  it('skips launchers switched off, but still scans one named explicitly', async () => {
+    const { api } = await setup();
+    await api.updateSettings({ launchers: { disabled: ['fake'] } });
+    expect(await api.integrations()).toEqual([{ id: 'fake', label: 'Fake Launcher', enabled: false }]);
+    expect((await api.games({ includeMaybe: false })).games).toEqual([]);
+    expect((await api.sync(request)).log[0]).toContain('No integrations are available');
+    expect((await api.sync({ ...request, only: ['fake'] })).added).toHaveLength(1);
+  });
+
+  it('downloads only the chosen kinds of artwork', async () => {
+    const routes = {
+      'https://www.steamgriddb.com/api/v2/search/autocomplete/Fortnite': { json: { success: true, data: [{ id: 1 }] } },
+      'https://www.steamgriddb.com/api/v2/heroes/game/1?types=static': { json: { success: true, data: [{ url: 'https://c/h.png' }] } },
+      'https://c/h.png': { body: Buffer.from('H') },
+    };
+    const fetchFn = fakeFetch(routes);
+    const { api } = await setup({ env: { STEAMGRIDDB_API_KEY: 'k' }, extra: { fetchFn } });
+    await api.updateSettings({ artwork: { kinds: ['hero'] } });
+    await api.sync({ ...request, artwork: true });
+    expect(fetchFn.requests.map((r) => r.url)).toEqual(Object.keys(routes));
   });
 });

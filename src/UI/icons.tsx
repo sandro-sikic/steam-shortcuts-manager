@@ -54,6 +54,19 @@ export const SyncIcon = () => (
   </Icon>
 );
 
+export const GearIcon = () => (
+  <Icon>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M12 2.5v2.4M12 19.1v2.4M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M2.5 12h2.4M19.1 12h2.4M4.6 19.4l1.7-1.7M17.7 6.3l1.7-1.7" />
+  </Icon>
+);
+
+export const ArrowLeftIcon = () => (
+  <Icon>
+    <path d="M19 12H5M11 6l-6 6 6 6" />
+  </Icon>
+);
+
 /** The app mark: three stacked game cards. */
 export const Logo = () => (
   <svg width="30" height="30" viewBox="0 0 32 32" aria-hidden="true">

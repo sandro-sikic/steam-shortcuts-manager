@@ -52,21 +52,50 @@ export async function findSteamRoot(options: LocateOptions): Promise<string> {
   throw new Error(`Steam installation not found. Looked in: ${candidates.join(', ')}. Use --steam-dir.`);
 }
 
-async function mostRecentAccountId(root: string): Promise<string | undefined> {
+interface LoginUser {
+  accountId: string;
+  /** Display name (persona), else the login name. */
+  name: string;
+  mostRecent: boolean;
+}
+
+/** The accounts Steam remembers, from `config/loginusers.vdf`; none if the file is missing or unusable. */
+async function readLoginUsers(root: string): Promise<LoginUser[]> {
   let text: string;
   try {
     text = await readFile(path.join(root, 'config', 'loginusers.vdf'), 'utf8');
   } catch {
-    return undefined;
+    return [];
   }
   const users = parseTextVdf(text).get('users');
-  if (!(users instanceof Map)) return undefined;
+  if (!(users instanceof Map)) return [];
+  const found: LoginUser[] = [];
   for (const [steamId, info] of users) {
-    if (info instanceof Map && info.get('MostRecent') === '1') {
-      return String(BigInt(steamId) - STEAM_ID_BASE);
-    }
+    if (!/^\d+$/.test(steamId) || !(info instanceof Map)) continue;
+    const name = info.get('PersonaName') ?? info.get('AccountName');
+    found.push({ accountId: String(BigInt(steamId) - STEAM_ID_BASE), name: typeof name === 'string' ? name : '', mostRecent: info.get('MostRecent') === '1' });
   }
-  return undefined;
+  return found;
+}
+
+async function mostRecentAccountId(root: string): Promise<string | undefined> {
+  return (await readLoginUsers(root)).find((user) => user.mostRecent)?.accountId;
+}
+
+export interface SteamAccount {
+  accountId: string;
+  /** Display name, or '' when Steam does not remember one. */
+  name: string;
+  mostRecent: boolean;
+}
+
+/** The Steam accounts that have data on this computer, with their names. */
+export async function listAccounts(root: string): Promise<SteamAccount[]> {
+  const users = await readLoginUsers(root);
+  return (await listAccountIds(root)).map((accountId) => {
+    const user = users.find((candidate) => candidate.accountId === accountId);
+    return { accountId, name: user?.name ?? '', mostRecent: user?.mostRecent === true };
+  });
 }
 
 export async function listAccountIds(root: string): Promise<string[]> {

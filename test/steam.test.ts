@@ -1,7 +1,7 @@
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { findSteamRoot, listAccountIds, resolveUser, steamRootCandidates } from '../src/steam/locate.js';
+import { findSteamRoot, listAccountIds, listAccounts, resolveUser, steamRootCandidates } from '../src/steam/locate.js';
 import { defaultRunner, isSteamRunning } from '../src/steam/running.js';
 import { buildShortcut, MANAGED_TAG } from '../src/steam/shortcuts.js';
 import { loadShortcuts, saveShortcuts, shortcutsPath } from '../src/steam/store.js';
@@ -90,6 +90,32 @@ describe('resolveUser', () => {
   it('asks for --user when it cannot decide', async () => {
     await expect(resolveUser(await makeSteamRoot(['1', '2']))).rejects.toThrow('Use --user with one of: 1, 2');
     await expect(resolveUser(await makeSteamRoot([]))).rejects.toThrow('one of: none');
+  });
+});
+
+describe('listAccounts', () => {
+  const vdf = `"users"
+{
+	"76561198000000001" { "AccountName" "login_a" "PersonaName" "Persona A" "MostRecent" "1" }
+	"76561198000000002" { "AccountName" "login_b" "MostRecent" "0" }
+	"76561198000000003" { "AccountName" { } }
+	"not-a-number" { "AccountName" "skipped" }
+	"76561198000000004" "text"
+}`;
+
+  it('names each account (display name, else login name) and marks the most recent', async () => {
+    const root = await makeSteamRoot(['39734273', '39734274', '39734275', '99'], vdf);
+    expect(await listAccounts(root)).toEqual([
+      { accountId: '39734273', name: 'Persona A', mostRecent: true },
+      { accountId: '39734274', name: 'login_b', mostRecent: false },
+      { accountId: '39734275', name: '', mostRecent: false },
+      { accountId: '99', name: '', mostRecent: false },
+    ]);
+  });
+
+  it('still lists the accounts without loginusers.vdf, or with an unusable one', async () => {
+    expect(await listAccounts(await makeSteamRoot(['5']))).toEqual([{ accountId: '5', name: '', mostRecent: false }]);
+    expect(await listAccounts(await makeSteamRoot(['5'], '"other" { }'))).toEqual([{ accountId: '5', name: '', mostRecent: false }]);
   });
 });
 

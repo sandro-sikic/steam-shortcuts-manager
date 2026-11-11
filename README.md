@@ -19,7 +19,7 @@ npm run start    # production build, then launch Electron
 - `electron/main.ts` creates the window (context isolation and sandbox on, no node integration, navigation locked)
   and `electron/preload.cts` exposes the bridge. The CommonJS preload repeats the channel names from `src/ipc.ts`;
   a test keeps them in sync.
-- `src/ipc.ts` is the typed contract (status, shortcuts, integrations, apps, games, setExcluded, sync) and `src/api.ts` implements it on
+- `src/ipc.ts` is the typed contract (status, shortcuts, integrations, apps, games, setExcluded, sync, settings, updateSettings, resetSettings, lists, setLists, apiKeyStatus, setApiKey, testApiKey, steamAccounts, about, openConfigFolder) and `src/api.ts` implements it on
   top of the same code the CLI uses, returning data instead of printing. To add a feature: add the method to
   `SteamManagerApi` and `CHANNELS`, implement it in `api.ts`, repeat the channel in the preload, and call it from the UI.
 - The UI defaults to a dry run. Syncing writes only while Steam is closed.
@@ -85,6 +85,28 @@ Unchecking saves the game's key (`store:id`) to the `exclude` list in `config.js
 ```json
 { "allow": ["Some Game"], "deny": ["Some Tool"], "exclude": ["Epic Games:fn"] }
 ```
+
+## Settings
+
+The gear in the header opens the settings page. Changes save as you make them.
+
+| Section | What it controls |
+|---|---|
+| Artwork | the SteamGridDB API key (with a Test button), which images to download, and whether sync downloads artwork |
+| Steam | the Steam folder (empty = auto-detect), the account, and whether changes may be written while Steam is running |
+| Sync | the sync panel's starting choices (Preview or Apply, remove games that are gone, weak guesses) and **auto-apply**, which applies to Steam as soon as you tick or untick a game |
+| Launchers | turn individual launchers on or off |
+| Library | games that are switched off, and the allow and deny lists for the installed-apps scan |
+| Appearance | theme (system, light, dark) and card size |
+| About | version, config file, Steam folder, open the config folder, reset settings |
+
+Settings live under `settings` in `config.json` (next to `allow`, `deny` and `exclude`), and the command line uses the
+Steam, artwork-kind and launcher settings too. The sync defaults, theme and card size only affect the desktop app.
+
+**The API key is stored encrypted** with the operating system's keychain (Electron `safeStorage`) in `secrets.json`,
+never as plain text, and is never sent back to the page (it only learns "set" or "not set"). If the system has no keychain
+the app says so and does not store the key; the `STEAMGRIDDB_API_KEY` environment variable still works, and the command line
+can only use that variable or `--api-key`. A key saved in the app wins over the environment variable.
 
 ## Installed apps (OS scan)
 

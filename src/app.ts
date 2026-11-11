@@ -1,6 +1,7 @@
 import { installArtwork, type ArtworkOutcome } from './artwork/install.js';
 import { SteamGridDbClient, type FetchLike } from './artwork/steamgriddb.js';
 import { configDir, loadConfig } from './config.js';
+import { loadSettings } from './settings.js';
 import { dedupeGames, exeKey, gameKey, normalizeTitle, type Duplicate, type KnownGames } from './dedupe.js';
 import { selectIntegrations, availableIntegrations } from './integrations/index.js';
 import type { Classification } from './integrations/os/classify.js';
@@ -53,9 +54,11 @@ export interface AddCommandOptions extends SyncCommandOptions {
   launchOptions?: string;
 }
 
+/** Locates Steam and picks the account; command-line options win over the saved settings. */
 export async function openUser(ctx: AppContext, options: GlobalOptions): Promise<SteamUser> {
-  const root = options.steamDir ?? (await findSteamRoot(ctx));
-  return resolveUser(root, options.user);
+  const { steam } = await loadSettings(configDir(ctx.platform, ctx.home, ctx.env));
+  const root = options.steamDir ?? (steam.dir || (await findSteamRoot(ctx)));
+  return resolveUser(root, options.user ?? (steam.user || undefined));
 }
 
 /** Games that already exist: installed in Steam itself, or shortcuts the user added by hand. */
@@ -75,7 +78,8 @@ export async function knownGames(user: SteamUser, existing: VdfMap[]): Promise<K
 }
 
 async function ensureSteamClosed(ctx: AppContext, options: GlobalOptions): Promise<void> {
-  if (options.allowSteamRunning) return;
+  const { steam } = await loadSettings(configDir(ctx.platform, ctx.home, ctx.env));
+  if (options.allowSteamRunning || steam.allowRunning) return;
   if (await isSteamRunning(ctx.platform, ctx.runner)) {
     throw new Error('Steam is running and would overwrite our changes. Close Steam first (or pass --allow-steam-running).');
   }
@@ -99,6 +103,7 @@ async function fetchArtwork(
     return;
   }
   const client = new SteamGridDbClient(apiKey, ctx.fetchFn);
+  const { artwork } = await loadSettings(configDir(ctx.platform, ctx.home, ctx.env));
   for (const item of items) {
     const outcomes = await installArtwork({
       gridDir: user.gridDir,
@@ -107,6 +112,7 @@ async function fetchArtwork(
       client,
       fetchFn: ctx.fetchFn,
       force: options.forceArtwork,
+      kinds: artwork.kinds,
     });
     ctx.log(`  ${item.title} (${summarize(outcomes)})`);
   }
@@ -192,7 +198,10 @@ export async function scanIntegrations(
 }
 
 export async function runSync(ctx: AppContext, options: GlobalOptions & SyncCommandOptions): Promise<SyncResult | undefined> {
-  const selected = selectIntegrations(ctx.platform, options.only, ctx.integrations);
+  const { launchers } = await loadSettings(configDir(ctx.platform, ctx.home, ctx.env));
+  const chosen = selectIntegrations(ctx.platform, options.only, ctx.integrations);
+  // Launchers switched off in settings are skipped, unless the user named them with --only.
+  const selected = options.only ? chosen : chosen.filter((integration) => !launchers.disabled.includes(integration.id));
   if (selected.length === 0) {
     ctx.log('No integrations are available on this platform, so there is nothing to sync. Use "add" to add a game by hand.');
     return undefined;

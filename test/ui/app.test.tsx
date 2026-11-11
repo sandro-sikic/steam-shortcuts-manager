@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/UI/App.js';
-import { gamesReport, installApi, okStatus } from './mockApi.js';
+import { applySettings, DEFAULT_SETTINGS } from '../../src/settingsModel.js';
+import { emptyReport, gamesReport, installApi, okStatus, settings } from './mockApi.js';
 
 afterEach(cleanup);
 
@@ -125,5 +126,143 @@ describe('App', () => {
     await waitFor(() => expect(mock.shortcuts).toHaveBeenCalledTimes(2));
     expect(mock.sync).toHaveBeenCalledTimes(1);
     expect(mock.games).toHaveBeenCalledTimes(2);
+  });
+
+  it('opens settings from the gear, and the library comes back and reloads', async () => {
+    const mock = installApi();
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.getByRole('region', { name: 'Artwork' })).toBeTruthy();
+    expect(screen.queryByRole('region', { name: 'Library' })).toBeNull();
+    expect(screen.queryByText('Preview changes')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Settings' }).getAttribute('aria-pressed')).toBe('true');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    await screen.findByText('Fortnite');
+    expect(mock.games).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('region', { name: 'Library' })).toBeTruthy();
+  });
+
+  it('goes back with the settings page back button too', async () => {
+    installApi();
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByText('Library', { selector: 'button.button' }));
+    await screen.findByText('Fortnite');
+  });
+
+  it('saves a setting and applies the theme to the whole page at once', async () => {
+    const mock = installApi();
+    render(<App />);
+    await screen.findByText('Fortnite');
+    expect(document.documentElement.dataset['theme']).toBeUndefined();
+    expect(document.documentElement.dataset['card']).toBe('medium');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Appearance' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Dark' }));
+    await waitFor(() => expect(document.documentElement.dataset['theme']).toBe('dark'));
+    expect(mock.updateSettings).toHaveBeenCalledWith({ ui: { theme: 'dark' } });
+    fireEvent.click(screen.getByRole('radio', { name: 'Large' }));
+    await waitFor(() => expect(document.documentElement.dataset['card']).toBe('large'));
+    fireEvent.click(screen.getByRole('radio', { name: 'System' }));
+    await waitFor(() => expect(document.documentElement.dataset['theme']).toBeUndefined());
+  });
+
+  it('resets all settings from About', async () => {
+    const mock = installApi();
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'About' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset settings' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset' }));
+    await screen.findByText('Settings reset.');
+    expect(mock.resetSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('reloads the library after games are switched back on in settings', async () => {
+    const mock = installApi();
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    fireEvent.click(screen.getByText('Library', { selector: '.settings-nav button' }));
+    const [first] = await screen.findAllByRole('button', { name: 'Turn on' });
+    fireEvent.click(first as HTMLElement);
+    await waitFor(() => expect(mock.setLists).toHaveBeenCalled());
+    await waitFor(() => expect(mock.games).toHaveBeenCalledTimes(2));
+  });
+
+  it('starts from the saved sync defaults', async () => {
+    const saved = applySettings(settings, { sync: { mode: 'apply', prune: true, includeMaybe: true, artwork: false } });
+    const mock = installApi({ settings: vi.fn(async () => saved) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    expect(mock.games).toHaveBeenCalledWith({ includeMaybe: true });
+    expect(mock.games).toHaveBeenCalledTimes(1);
+    expect((screen.getByRole('radio', { name: 'Apply' }) as HTMLButtonElement).getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByRole('switch', { name: /weak guesses/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('switch', { name: /Remove shortcuts/ }) as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByRole('switch', { name: /Download artwork/ }) as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('shows an error when the settings cannot be read', async () => {
+    installApi({ settings: vi.fn(async () => { throw new Error("Error invoking remote method 'x': Error: Invalid settings in config file: ui.theme must be one of"); }) });
+    render(<App />);
+    expect((await screen.findByRole('alert')).textContent).toContain('Invalid settings in config file');
+    expect((screen.getByRole('button', { name: 'Preview changes' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('App auto-apply', () => {
+  const auto = applySettings(settings, { sync: { autoApply: true, prune: true, includeMaybe: false, artwork: false } });
+
+  it('applies to Steam as soon as a game is ticked, then reloads', async () => {
+    const mock = installApi({ settings: vi.fn(async () => auto) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(box(/Fortnite/));
+    await waitFor(() => expect(mock.sync).toHaveBeenCalledTimes(1));
+    expect(mock.setExcluded).toHaveBeenCalledWith(['Epic Games:fn'], true);
+    expect(mock.sync).toHaveBeenCalledWith({ dryRun: false, prune: true, includeMaybe: false, artwork: false });
+    await waitFor(() => expect(mock.games).toHaveBeenCalledTimes(2));
+  });
+
+  it('keeps the weak-guess choice made in the sync panel when applying', async () => {
+    const mock = installApi({ settings: vi.fn(async () => auto) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(screen.getByRole('switch', { name: /weak guesses/ }));
+    await waitFor(() => expect(mock.games).toHaveBeenLastCalledWith({ includeMaybe: true }));
+    fireEvent.click(box(/Fortnite/));
+    await waitFor(() => expect(mock.sync).toHaveBeenCalledWith({ dryRun: false, prune: true, includeMaybe: true, artwork: false }));
+  });
+
+  it('shows why applying failed, after reloading', async () => {
+    const mock = installApi({ settings: vi.fn(async () => auto), sync: vi.fn(async () => ({ ...emptyReport, error: 'Steam is running' })) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(box(/Fortnite/));
+    expect((await screen.findByRole('alert')).textContent).toBe('Steam is running');
+    expect(mock.games).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not apply when Steam cannot be found, or when auto-apply is off', async () => {
+    const noSteam = installApi({ settings: vi.fn(async () => auto), status: vi.fn(async () => ({ platform: 'linux', steamRunning: false, error: 'Steam installation not found' })) });
+    render(<App />);
+    await screen.findByText('Can’t reach Steam');
+    fireEvent.click(box(/Fortnite/));
+    await waitFor(() => expect(noSteam.setExcluded).toHaveBeenCalled());
+    expect(noSteam.sync).not.toHaveBeenCalled();
+    cleanup();
+
+    const off = installApi({ settings: vi.fn(async () => DEFAULT_SETTINGS) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    fireEvent.click(box(/Fortnite/));
+    await waitFor(() => expect(off.setExcluded).toHaveBeenCalled());
+    expect(off.sync).not.toHaveBeenCalled();
   });
 });

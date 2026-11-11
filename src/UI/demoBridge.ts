@@ -1,4 +1,5 @@
-import type { AppInfo, GameInfo, GamesReport, ShortcutInfo, SteamManagerApi, SyncItemInfo, SyncReport, SyncRequest } from '../ipc.js';
+import type { ApiKeyStatus, AppInfo, GameInfo, GamesReport, Lists, ShortcutInfo, SteamManagerApi, SyncItemInfo, SyncReport, SyncRequest } from '../ipc.js';
+import { applySettings, DEFAULT_SETTINGS } from '../settingsModel.js';
 
 interface DemoGame {
   store: string;
@@ -27,6 +28,11 @@ const keyOf = (game: DemoGame): string => `${game.store}:${game.id}`;
 export function createDemoBridge(): SteamManagerApi {
   const appIdOf = (game: DemoGame): number => 1000 + DEMO_GAMES.indexOf(game);
   const excluded = new Set<string>();
+  let settings = structuredClone(DEFAULT_SETTINGS);
+  let allow: string[] = [];
+  let deny: string[] = ['Some Tool'];
+  let apiKey = '';
+  const keyStatus = (): ApiKeyStatus => ({ set: apiKey !== '', source: apiKey === '' ? 'none' : 'saved', secureStorage: true });
   let shortcuts: ShortcutInfo[] = [
     { appId: appIdOf(DEMO_GAMES[0] as DemoGame), title: 'Fortnite', tags: ['Epic Games'], managed: true },
     { appId: appIdOf(DEMO_GAMES[2] as DemoGame), title: 'Hades', tags: ['GOG Galaxy'], managed: true },
@@ -39,12 +45,13 @@ export function createDemoBridge(): SteamManagerApi {
   return {
     status: async () => ({ platform: 'demo', steamRunning: false, steamRoot: '/demo/Steam', accountId: '1' }),
     shortcuts: async () => shortcuts.map((shortcut) => ({ ...shortcut })),
-    integrations: async () => [
-      { id: 'epic', label: 'Epic Games' },
-      { id: 'gog', label: 'GOG Galaxy' },
-      { id: 'heroic', label: 'Heroic Games Launcher' },
-      { id: 'os', label: 'Installed Apps' },
-    ],
+    integrations: async () =>
+      [
+        { id: 'epic', label: 'Epic Games' },
+        { id: 'gog', label: 'GOG Galaxy' },
+        { id: 'heroic', label: 'Heroic Games Launcher' },
+        { id: 'os', label: 'Installed Apps' },
+      ].map((integration) => ({ ...integration, enabled: !settings.launchers.disabled.includes(integration.id) })),
     apps: async (all): Promise<AppInfo[]> => {
       const found: AppInfo[] = DEMO_GAMES.map(({ title }) => ({ id: title.toLowerCase(), name: title, verdict: 'game', reason: 'freedesktop-game' }));
       return all ? [...found, { id: 'editor', name: 'Text Editor', verdict: 'no', reason: 'categorized as Utility' }] : found;
@@ -62,6 +69,41 @@ export function createDemoBridge(): SteamManagerApi {
         else excluded.delete(key);
       }
     },
+    settings: async () => structuredClone(settings),
+    updateSettings: async (patch) => {
+      settings = applySettings(settings, patch);
+      return structuredClone(settings);
+    },
+    resetSettings: async () => {
+      settings = structuredClone(DEFAULT_SETTINGS);
+      return structuredClone(settings);
+    },
+    lists: async (): Promise<Lists> => ({ allow: [...allow], deny: [...deny], exclude: [...excluded].sort() }),
+    setLists: async (patch) => {
+      allow = patch.allow ?? allow;
+      deny = patch.deny ?? deny;
+      if (patch.exclude) {
+        excluded.clear();
+        for (const key of patch.exclude) excluded.add(key);
+      }
+      return { allow: [...allow], deny: [...deny], exclude: [...excluded].sort() };
+    },
+    apiKeyStatus: async () => keyStatus(),
+    setApiKey: async (key) => {
+      apiKey = key.trim();
+      return keyStatus();
+    },
+    testApiKey: async (key) => {
+      const candidate = key?.trim() || apiKey;
+      if (!candidate) return { ok: false, message: 'There is no API key to test.' };
+      return candidate.length >= 8 ? { ok: true, message: 'The key works.' } : { ok: false, message: 'SteamGridDB rejected this key.' };
+    },
+    steamAccounts: async () => [
+      { accountId: '1', name: 'demo_player', mostRecent: true },
+      { accountId: '2', name: '', mostRecent: false },
+    ],
+    about: async () => ({ version: 'demo', platform: 'demo', configFile: '/demo/steam-manager/config.json', steamRoot: '/demo/Steam', secureStorage: true }),
+    openConfigFolder: async () => undefined,
     sync: async (request: SyncRequest): Promise<SyncReport> => {
       const games = listed(request.includeMaybe);
       const item = (game: DemoGame): SyncItemInfo => ({ appId: appIdOf(game), title: game.title, store: game.store });

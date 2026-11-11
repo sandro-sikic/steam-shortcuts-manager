@@ -98,4 +98,51 @@ describe('demo bridge', () => {
     installDemoBridge();
     expect((await window.steamManager.status()).platform).toBe('demo');
   });
+
+  it('keeps settings in memory, validating changes, and can reset them', async () => {
+    const bridge = createDemoBridge();
+    expect((await bridge.settings()).ui.theme).toBe('system');
+    expect((await bridge.updateSettings({ ui: { theme: 'dark' } })).ui.theme).toBe('dark');
+    expect((await bridge.settings()).ui.theme).toBe('dark');
+    await expect(bridge.updateSettings({ ui: { theme: 'neon' } } as never)).rejects.toThrow('ui.theme must be one of');
+    expect((await bridge.resetSettings()).ui.theme).toBe('system');
+    const copy = await bridge.settings();
+    copy.ui.theme = 'light';
+    expect((await bridge.settings()).ui.theme).toBe('system');
+  });
+
+  it('shows launchers as switched off when settings say so', async () => {
+    const bridge = createDemoBridge();
+    await bridge.updateSettings({ launchers: { disabled: ['gog'] } });
+    expect((await bridge.integrations()).map((i) => [i.id, i.enabled])).toEqual([['epic', true], ['gog', false], ['heroic', true], ['os', true]]);
+  });
+
+  it('keeps the allow, deny and exclude lists, and the exclusions drive the library', async () => {
+    const bridge = createDemoBridge();
+    expect(await bridge.lists()).toEqual({ allow: [], deny: ['Some Tool'], exclude: [] });
+    expect(await bridge.setLists({ allow: ['Hades'] })).toEqual({ allow: ['Hades'], deny: ['Some Tool'], exclude: [] });
+    expect((await bridge.setLists({ deny: [], exclude: ['Epic Games:rl', 'GOG Galaxy:hades'] })).exclude).toEqual(['Epic Games:rl', 'GOG Galaxy:hades']);
+    expect((await bridge.games(fresh)).games.filter((g) => g.excluded).map((g) => g.title)).toEqual(['Rocket League', 'Hades']);
+    await bridge.setLists({ exclude: [] });
+    expect((await bridge.games(fresh)).games.some((g) => g.excluded)).toBe(false);
+  });
+
+  it('keeps an API key in memory and tests it', async () => {
+    const bridge = createDemoBridge();
+    expect(await bridge.apiKeyStatus()).toEqual({ set: false, source: 'none', secureStorage: true });
+    expect(await bridge.testApiKey()).toEqual({ ok: false, message: 'There is no API key to test.' });
+    expect(await bridge.testApiKey('short')).toEqual({ ok: false, message: 'SteamGridDB rejected this key.' });
+    expect(await bridge.testApiKey('long-enough-key')).toEqual({ ok: true, message: 'The key works.' });
+    expect(await bridge.setApiKey('  my-demo-key  ')).toEqual({ set: true, source: 'saved', secureStorage: true });
+    expect((await bridge.testApiKey()).ok).toBe(true);
+    expect((await bridge.testApiKey('  ')).ok).toBe(true);
+    expect(await bridge.setApiKey('')).toEqual({ set: false, source: 'none', secureStorage: true });
+  });
+
+  it('describes the demo Steam accounts and the app', async () => {
+    const bridge = createDemoBridge();
+    expect((await bridge.steamAccounts()).map((a) => [a.accountId, a.mostRecent])).toEqual([['1', true], ['2', false]]);
+    expect(await bridge.about()).toMatchObject({ version: 'demo', steamRoot: '/demo/Steam', secureStorage: true });
+    await expect(bridge.openConfigFolder()).resolves.toBeUndefined();
+  });
 });

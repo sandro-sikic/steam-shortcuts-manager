@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
-import type { GameInfo, GamesReport, IntegrationInfo, ShortcutInfo, StatusInfo, SteamManagerApi, SyncReport } from '../../src/ipc.js';
+import type { AboutInfo, ApiKeyStatus, GameInfo, GamesReport, IntegrationInfo, Lists, ShortcutInfo, StatusInfo, SteamAccountInfo, SteamManagerApi, SyncReport } from '../../src/ipc.js';
+import { applySettings, DEFAULT_SETTINGS, type Settings } from '../../src/settingsModel.js';
 
 export const okStatus: StatusInfo = { platform: 'linux', steamRunning: false, steamRoot: '/home/me/.steam/steam', accountId: '42' };
 
@@ -34,9 +35,18 @@ export const shortcuts: ShortcutInfo[] = [
 ];
 
 export const integrations: IntegrationInfo[] = [
-  { id: 'epic', label: 'Epic Games' },
-  { id: 'gog', label: 'GOG Galaxy' },
+  { id: 'epic', label: 'Epic Games', enabled: true },
+  { id: 'gog', label: 'GOG Galaxy', enabled: true },
 ];
+
+export const settings: Settings = structuredClone(DEFAULT_SETTINGS);
+export const lists: Lists = { allow: ['Some Game'], deny: ['Some Tool'], exclude: ['Epic Games:rl', 'GOG Galaxy:hades'] };
+export const keyStatus: ApiKeyStatus = { set: false, source: 'none', secureStorage: true };
+export const accounts: SteamAccountInfo[] = [
+  { accountId: '42', name: 'player_one', mostRecent: true },
+  { accountId: '7', name: '', mostRecent: false },
+];
+export const about: AboutInfo = { version: '1.2.3', platform: 'linux', configFile: '/home/me/.config/steam-manager/config.json', steamRoot: '/home/me/.steam/steam', secureStorage: true };
 
 export type MockApi = { [K in keyof SteamManagerApi]: ReturnType<typeof vi.fn> };
 
@@ -50,6 +60,17 @@ export function installApi(overrides: Partial<MockApi> = {}): MockApi {
     games: vi.fn(async () => gamesReport),
     setExcluded: vi.fn(async () => undefined),
     sync: vi.fn(async () => emptyReport),
+    settings: vi.fn(async () => structuredClone(settings)),
+    updateSettings: vi.fn(async (patch: object) => applySettings(settings, patch)),
+    resetSettings: vi.fn(async () => structuredClone(DEFAULT_SETTINGS)),
+    lists: vi.fn(async () => structuredClone(lists)),
+    setLists: vi.fn(async (patch: Partial<Lists>) => ({ ...structuredClone(lists), ...patch })),
+    apiKeyStatus: vi.fn(async () => keyStatus),
+    setApiKey: vi.fn(async () => keyStatus),
+    testApiKey: vi.fn(async () => ({ ok: true, message: 'The key works.' })),
+    steamAccounts: vi.fn(async () => accounts),
+    about: vi.fn(async () => about),
+    openConfigFolder: vi.fn(async () => undefined),
     ...overrides,
   };
   window.steamManager = mock as unknown as SteamManagerApi;

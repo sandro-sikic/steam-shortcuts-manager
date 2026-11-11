@@ -6,6 +6,7 @@ import { Check } from '../../src/UI/Check.js';
 import { Header } from '../../src/UI/Header.js';
 import { Library } from '../../src/UI/Library.js';
 import { SyncPanel } from '../../src/UI/SyncPanel.js';
+import { DEFAULT_SETTINGS } from '../../src/settingsModel.js';
 import { emptyReport, gamesReport, installApi, integrations, okStatus, shortcuts } from './mockApi.js';
 
 afterEach(cleanup);
@@ -26,10 +27,11 @@ describe('api helpers', () => {
 });
 
 describe('Header', () => {
-  const renderHeader = (status: Parameters<typeof Header>[0]['status'], loading = false) => {
+  const renderHeader = (status: Parameters<typeof Header>[0]['status'], loading = false, settingsOpen = false) => {
     const onRefresh = vi.fn();
-    render(<Header status={status} loading={loading} onRefresh={onRefresh} />);
-    return onRefresh;
+    const onToggleSettings = vi.fn();
+    render(<Header status={status} loading={loading} settingsOpen={settingsOpen} onRefresh={onRefresh} onToggleSettings={onToggleSettings} />);
+    return { onRefresh, onToggleSettings };
   };
 
   it('shows the app name and that Steam is closed', () => {
@@ -55,9 +57,22 @@ describe('Header', () => {
   });
 
   it('refreshes on demand', () => {
-    const onRefresh = renderHeader(okStatus);
+    const { onRefresh } = renderHeader(okStatus);
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('has a settings button that shows whether settings are open', () => {
+    const { onToggleSettings } = renderHeader(okStatus);
+    const gear = screen.getByRole('button', { name: 'Settings' });
+    expect(gear.getAttribute('aria-pressed')).toBe('false');
+    expect(gear.className).toBe('icon-button');
+    fireEvent.click(gear);
+    expect(onToggleSettings).toHaveBeenCalledTimes(1);
+    cleanup();
+    renderHeader(okStatus, false, true);
+    expect(screen.getByRole('button', { name: 'Settings' }).getAttribute('aria-pressed')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Settings' }).className).toContain('active');
   });
 });
 
@@ -241,6 +256,7 @@ describe('SyncPanel', () => {
     render(
       <SyncPanel
         integrations={integrations}
+        defaults={DEFAULT_SETTINGS.sync}
         disabled={false}
         includeMaybe={false}
         onIncludeMaybe={onIncludeMaybe}
@@ -275,6 +291,26 @@ describe('SyncPanel', () => {
     expect(toggle(/Remove shortcuts/).checked).toBe(false);
     expect(toggle(/weak guesses/).checked).toBe(false);
     expect(screen.getByRole('button', { name: 'Preview changes' })).toBeTruthy();
+  });
+
+  it('starts from the defaults in settings', () => {
+    installApi();
+    renderPanel({ defaults: { ...DEFAULT_SETTINGS.sync, mode: 'apply', prune: true, artwork: false } });
+    expect(mode('Apply').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByRole('button', { name: 'Apply to Steam' })).toBeTruthy();
+    expect(toggle(/Remove shortcuts/).checked).toBe(true);
+    expect(toggle(/Download artwork/).checked).toBe(false);
+  });
+
+  it('lists only the launchers that are turned on', () => {
+    installApi();
+    renderPanel({ integrations: [{ id: 'epic', label: 'Epic Games', enabled: true }, { id: 'gog', label: 'GOG Galaxy', enabled: false }] });
+    const launchers = within(screen.getByLabelText('Launchers scanned'));
+    expect(launchers.getByText('Epic Games')).toBeTruthy();
+    expect(launchers.queryByText('GOG Galaxy')).toBeNull();
+    cleanup();
+    renderPanel({ integrations: [{ id: 'gog', label: 'GOG Galaxy', enabled: false }] });
+    expect(screen.getByText('No launchers on this platform')).toBeTruthy();
   });
 
   it('says what the selection will change in Steam', () => {

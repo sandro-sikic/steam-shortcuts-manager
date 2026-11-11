@@ -3,6 +3,10 @@
  * so both sides (and the preload script) can agree without sharing any Node code.
  */
 
+import type { Settings, SettingsPatch } from './settingsModel.js';
+
+export type { Settings, SettingsPatch };
+
 export interface StatusInfo {
   platform: string;
   steamRunning: boolean;
@@ -24,6 +28,8 @@ export interface ShortcutInfo {
 export interface IntegrationInfo {
   id: string;
   label: string;
+  /** Scanned by sync; switched off in settings when false. */
+  enabled: boolean;
 }
 
 export interface AppInfo {
@@ -99,6 +105,46 @@ export interface SyncReport {
   error?: string;
 }
 
+/** The user's own lists in `config.json`. */
+export interface Lists {
+  /** Installed apps (title or id) that are always games. */
+  allow: string[];
+  /** Installed apps (title or id) that are never games. */
+  deny: string[];
+  /** Games (`store:id`) switched off in the library. */
+  exclude: string[];
+}
+
+export interface ApiKeyStatus {
+  /** Whether any key is available to download artwork. */
+  set: boolean;
+  /** Where it comes from: saved in the app, the STEAMGRIDDB_API_KEY environment variable, or nowhere. */
+  source: 'saved' | 'environment' | 'none';
+  /** Whether keys can be stored encrypted on this system. */
+  secureStorage: boolean;
+}
+
+export interface ApiKeyTest {
+  ok: boolean;
+  message: string;
+}
+
+export interface SteamAccountInfo {
+  accountId: string;
+  /** Display name, or '' when Steam does not remember one. */
+  name: string;
+  mostRecent: boolean;
+}
+
+export interface AboutInfo {
+  version: string;
+  platform: string;
+  /** The config file that holds settings and game choices. */
+  configFile: string;
+  steamRoot?: string;
+  secureStorage: boolean;
+}
+
 export interface SteamManagerApi {
   status(): Promise<StatusInfo>;
   shortcuts(): Promise<ShortcutInfo[]>;
@@ -110,6 +156,21 @@ export interface SteamManagerApi {
   /** Switches games off (`excluded` true) or back on, by key. The choice is saved and used by every sync. */
   setExcluded(keys: string[], excluded: boolean): Promise<void>;
   sync(request: SyncRequest): Promise<SyncReport>;
+  settings(): Promise<Settings>;
+  /** Changes some settings; returns all of them. Invalid values are rejected. */
+  updateSettings(patch: SettingsPatch): Promise<Settings>;
+  resetSettings(): Promise<Settings>;
+  lists(): Promise<Lists>;
+  /** Replaces the given lists; returns all of them. */
+  setLists(patch: Partial<Lists>): Promise<Lists>;
+  apiKeyStatus(): Promise<ApiKeyStatus>;
+  /** Saves the SteamGridDB key encrypted; an empty key removes it. */
+  setApiKey(key: string): Promise<ApiKeyStatus>;
+  /** Checks a key (or the one in use when omitted) against SteamGridDB. */
+  testApiKey(key?: string): Promise<ApiKeyTest>;
+  steamAccounts(): Promise<SteamAccountInfo[]>;
+  about(): Promise<AboutInfo>;
+  openConfigFolder(): Promise<void>;
 }
 
 export const CHANNELS = {
@@ -120,6 +181,17 @@ export const CHANNELS = {
   games: 'steam-manager:games',
   setExcluded: 'steam-manager:set-excluded',
   sync: 'steam-manager:sync',
+  settings: 'steam-manager:settings',
+  updateSettings: 'steam-manager:update-settings',
+  resetSettings: 'steam-manager:reset-settings',
+  lists: 'steam-manager:lists',
+  setLists: 'steam-manager:set-lists',
+  apiKeyStatus: 'steam-manager:api-key-status',
+  setApiKey: 'steam-manager:set-api-key',
+  testApiKey: 'steam-manager:test-api-key',
+  steamAccounts: 'steam-manager:steam-accounts',
+  about: 'steam-manager:about',
+  openConfigFolder: 'steam-manager:open-config-folder',
 } as const satisfies Record<keyof SteamManagerApi, string>;
 
 /** The part of Electron's `ipcMain` we use, so registration can be tested without Electron. */

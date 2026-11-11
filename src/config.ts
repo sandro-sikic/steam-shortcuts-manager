@@ -31,12 +31,12 @@ function stringList(value: unknown, name: string, file: string): string[] {
   return value as string[];
 }
 
-function configFile(dir: string): string {
+export function configFile(dir: string): string {
   return path.join(dir, 'config.json');
 }
 
 /** Parses the raw config; a missing file is an empty object, an unreadable one an error. */
-async function readRaw(dir: string): Promise<Record<string, unknown>> {
+export async function readRaw(dir: string): Promise<Record<string, unknown>> {
   const file = configFile(dir);
   const text = await readTextIfExists(file);
   if (text === undefined) return {};
@@ -50,6 +50,12 @@ async function readRaw(dir: string): Promise<Record<string, unknown>> {
     throw new Error(`Invalid config file ${file}: expected a JSON object`);
   }
   return data as Record<string, unknown>;
+}
+
+/** Writes the whole `config.json`, creating the folder. */
+export async function writeRaw(dir: string, record: Record<string, unknown>): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  await writeFile(configFile(dir), `${JSON.stringify(record, null, 2)}\n`);
 }
 
 /** Loads `config.json` from the config dir; a missing file means no overrides. */
@@ -67,7 +73,6 @@ export async function loadConfig(dir: string): Promise<Config> {
 export async function updateConfig(dir: string, patch: Partial<Config>): Promise<Config> {
   const raw = await readRaw(dir);
   const next = { ...(await loadConfig(dir)), ...patch };
-  await mkdir(dir, { recursive: true });
-  await writeFile(configFile(dir), `${JSON.stringify({ ...raw, ...next }, null, 2)}\n`);
+  await writeRaw(dir, { ...raw, ...next });
   return next;
 }

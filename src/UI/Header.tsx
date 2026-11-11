@@ -1,5 +1,5 @@
 import type { StatusInfo } from '../ipc.js';
-import { AlertIcon, CheckIcon, Logo, RefreshIcon } from './icons.js';
+import { AlertIcon, CheckIcon, GearIcon, Logo, RefreshIcon } from './icons.js';
 
 function StatusPill({ status, loading }: { status?: StatusInfo; loading: boolean }) {
   if (loading) return <span className="pill skeleton" role="status" aria-label="Checking Steam" />;
@@ -9,7 +9,19 @@ function StatusPill({ status, loading }: { status?: StatusInfo; loading: boolean
   return <span className="pill ok"><CheckIcon />Steam is closed</span>;
 }
 
-export function Header({ status, loading, onRefresh }: { status?: StatusInfo; loading: boolean; onRefresh: () => void }) {
+export function Header({
+  status,
+  loading,
+  settingsOpen,
+  onRefresh,
+  onToggleSettings,
+}: {
+  status?: StatusInfo;
+  loading: boolean;
+  settingsOpen: boolean;
+  onRefresh: () => void;
+  onToggleSettings: () => void;
+}) {
   return (
     <header className="top">
       <div className="brand">
@@ -20,6 +32,9 @@ export function Header({ status, loading, onRefresh }: { status?: StatusInfo; lo
         <StatusPill status={status} loading={loading} />
         <button type="button" className="icon-button" aria-label="Refresh" title="Refresh" onClick={onRefresh}>
           <RefreshIcon />
+        </button>
+        <button type="button" className={settingsOpen ? 'icon-button active' : 'icon-button'} aria-label="Settings" aria-pressed={settingsOpen} title="Settings" onClick={onToggleSettings}>
+          <GearIcon />
         </button>
       </div>
     </header>

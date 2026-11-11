@@ -1,4 +1,6 @@
-export type ArtworkKind = 'poster' | 'hero' | 'logo' | 'icon' | 'wide';
+import type { ArtworkKind } from './kinds.js';
+
+export type { ArtworkKind };
 
 /** The slice of the fetch API we rely on, so tests (and other runtimes) can substitute it. */
 export interface FetchResponse {

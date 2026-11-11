@@ -88,6 +88,23 @@ describe('installArtwork', () => {
     expect(outcomes.map((o) => o.status)).toEqual(['missing', 'missing', 'saved', 'missing', 'missing']);
   });
 
+  it('downloads only the chosen kinds', async () => {
+    const gridDir = await makeTempDir();
+    const fetchFn = fakeFetch(images);
+    const outcomes = await installArtwork({ gridDir, appId: 9, title: 'T', client: stubClient(base), fetchFn, kinds: ['hero', 'icon'] });
+    expect(outcomes.map((o) => o.kind)).toEqual(['hero', 'icon']);
+    expect((await readdir(gridDir)).sort()).toEqual(['9_hero.png', '9_icon.png']);
+    expect(fetchFn.requests).toHaveLength(2);
+  });
+
+  it('reports only the chosen kinds as missing or failed', async () => {
+    const missing = await installArtwork({ gridDir: await makeTempDir(), appId: 1, title: 'T', client: stubClient({}, null), fetchFn: fakeFetch({}), kinds: ['logo'] });
+    expect(missing).toEqual([{ kind: 'logo', status: 'missing' }]);
+    const client = { searchGame: async () => { throw new Error('boom'); }, findArtworkUrl: async () => undefined };
+    const failed = await installArtwork({ gridDir: await makeTempDir(), appId: 1, title: 'T', client, fetchFn: fakeFetch({}), kinds: [] });
+    expect(failed).toEqual([]);
+  });
+
   it('reports every kind missing when the game is unknown, without creating the folder', async () => {
     const gridDir = path.join(await makeTempDir(), 'grid');
     const outcomes = await installArtwork({ gridDir, appId: 1, title: 'T', client: stubClient({}, null), fetchFn: fakeFetch({}) });

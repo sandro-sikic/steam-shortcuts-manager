@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import type { IntegrationInfo, SyncReport } from '../ipc.js';
+import type { IntegrationInfo, Settings, SyncReport } from '../ipc.js';
 import { api, errorMessage } from './api.js';
 import { SyncIcon } from './icons.js';
+import { Segmented } from './Segmented.js';
+import { Switch } from './Switch.js';
 
 const SWITCHES = [
   { key: 'prune', label: 'Remove shortcuts for games that are gone' },
@@ -21,6 +23,7 @@ type Toggles = Record<(typeof SWITCHES)[number]['key'], boolean>;
 
 export function SyncPanel({
   integrations,
+  defaults,
   disabled,
   includeMaybe,
   onIncludeMaybe,
@@ -28,14 +31,16 @@ export function SyncPanel({
   onChanged,
 }: {
   integrations: IntegrationInfo[];
+  /** The starting choices, from settings. */
+  defaults: Settings['sync'];
   disabled: boolean;
   includeMaybe: boolean;
   onIncludeMaybe: (next: boolean) => void;
   pending: { add: number; remove: number };
   onChanged: () => void;
 }) {
-  const [mode, setMode] = useState<Mode>('preview');
-  const [toggles, setToggles] = useState<Toggles>({ prune: false, artwork: true });
+  const [mode, setMode] = useState<Mode>(defaults.mode);
+  const [toggles, setToggles] = useState<Toggles>({ prune: defaults.prune, artwork: defaults.artwork });
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ report: SyncReport; dryRun: boolean }>();
   const [failure, setFailure] = useState<string>();
@@ -61,10 +66,12 @@ export function SyncPanel({
       <p className="sub">Finds the games installed on this computer and adds them to Steam.</p>
 
       <div className="launchers" aria-label="Launchers scanned">
-        {integrations.length === 0 ? (
+        {integrations.filter((integration) => integration.enabled).length === 0 ? (
           <span className="muted">No launchers on this platform</span>
         ) : (
-          integrations.map((integration) => (
+          integrations
+            .filter((integration) => integration.enabled)
+            .map((integration) => (
             <span key={integration.id} className="chip launcher">
               {integration.label}
             </span>
@@ -72,28 +79,26 @@ export function SyncPanel({
         )}
       </div>
 
-      <div className="segmented" role="radiogroup" aria-label="Mode">
-        {(['preview', 'apply'] as const).map((value) => (
-          <button key={value} type="button" role="radio" aria-checked={mode === value} className={mode === value ? 'on' : ''} onClick={() => setMode(value)}>
-            {value === 'preview' ? 'Preview' : 'Apply'}
-          </button>
-        ))}
-      </div>
+      <Segmented
+        label="Mode"
+        value={mode}
+        options={[
+          { value: 'preview', label: 'Preview' },
+          { value: 'apply', label: 'Apply' },
+        ]}
+        onChange={setMode}
+      />
       <p className="hint">{mode === 'preview' ? 'Shows what would change. Nothing is written.' : 'Writes to Steam. Close Steam first.'}</p>
 
       <div className="switches">
         {SWITCHES.map(({ key, label }) => (
-          <label key={key} className="switch">
-            <input type="checkbox" role="switch" checked={toggles[key]} onChange={(event) => setToggles({ ...toggles, [key]: event.target.checked })} />
-            <span className="track" aria-hidden="true" />
-            <span>{label}</span>
-          </label>
+          <Switch key={key} checked={toggles[key]} onChange={(next) => setToggles({ ...toggles, [key]: next })}>
+            {label}
+          </Switch>
         ))}
-        <label className="switch">
-          <input type="checkbox" role="switch" checked={includeMaybe} onChange={(event) => onIncludeMaybe(event.target.checked)} />
-          <span className="track" aria-hidden="true" />
-          <span>List weak guesses (Unity/Unreal installs)</span>
-        </label>
+        <Switch checked={includeMaybe} onChange={onIncludeMaybe}>
+          List weak guesses (Unity/Unreal installs)
+        </Switch>
       </div>
 
       <p className="pending">

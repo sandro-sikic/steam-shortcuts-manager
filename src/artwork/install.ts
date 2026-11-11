@@ -1,6 +1,9 @@
 import { mkdir, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { ArtworkKind, FetchLike, SteamGridDbClient } from './steamgriddb.js';
+import { ARTWORK_KINDS, type ArtworkKind } from './kinds.js';
+import type { FetchLike, SteamGridDbClient } from './steamgriddb.js';
+
+export { ARTWORK_KINDS };
 
 /** File-name suffix Steam expects in `userdata/<id>/config/grid` for each artwork kind. */
 const SUFFIXES: Record<ArtworkKind, string> = {
@@ -10,8 +13,6 @@ const SUFFIXES: Record<ArtworkKind, string> = {
   logo: '_logo',
   icon: '_icon',
 };
-
-export const ARTWORK_KINDS = Object.keys(SUFFIXES) as ArtworkKind[];
 
 export type ArtworkStatus = 'saved' | 'exists' | 'missing' | 'failed';
 
@@ -30,6 +31,8 @@ export interface InstallArtworkOptions {
   fetchFn: FetchLike;
   /** Re-download images even if the file already exists. */
   force?: boolean;
+  /** Which kinds to download; all when omitted. */
+  kinds?: readonly ArtworkKind[];
 }
 
 function extensionOf(url: string): string {
@@ -51,19 +54,19 @@ async function exists(file: string): Promise<boolean> {
  * Failures are reported per image rather than thrown, so one bad download never aborts a sync.
  */
 export async function installArtwork(options: InstallArtworkOptions): Promise<ArtworkOutcome[]> {
-  const { gridDir, appId, title, client, fetchFn, force = false } = options;
+  const { gridDir, appId, title, client, fetchFn, force = false, kinds = ARTWORK_KINDS } = options;
   let gameId: number | undefined;
   try {
     gameId = await client.searchGame(title);
   } catch (error) {
     const message = (error as Error).message;
-    return ARTWORK_KINDS.map((kind) => ({ kind, status: 'failed', error: message }));
+    return kinds.map((kind) => ({ kind, status: 'failed', error: message }));
   }
-  if (gameId === undefined) return ARTWORK_KINDS.map((kind) => ({ kind, status: 'missing' }));
+  if (gameId === undefined) return kinds.map((kind) => ({ kind, status: 'missing' }));
 
   await mkdir(gridDir, { recursive: true });
   const outcomes: ArtworkOutcome[] = [];
-  for (const kind of ARTWORK_KINDS) {
+  for (const kind of kinds) {
     try {
       const url = await client.findArtworkUrl(gameId, kind);
       if (url === undefined) {
