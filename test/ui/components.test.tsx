@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, errorMessage } from '../../src/UI/api.js';
-import { ShortcutList } from '../../src/UI/ShortcutList.js';
-import { StatusCard } from '../../src/UI/StatusCard.js';
+import { Header } from '../../src/UI/Header.js';
+import { Library } from '../../src/UI/Library.js';
 import { SyncPanel } from '../../src/UI/SyncPanel.js';
 import { emptyReport, installApi, integrations, okStatus, shortcuts } from './mockApi.js';
 
@@ -24,40 +24,77 @@ describe('api helpers', () => {
   });
 });
 
-describe('StatusCard', () => {
-  it('shows the installation, account and that Steam is closed', () => {
-    render(<StatusCard status={okStatus} />);
-    expect(screen.getByText('/home/me/.steam/steam')).toBeTruthy();
-    expect(screen.getByText('42')).toBeTruthy();
+describe('Header', () => {
+  const renderHeader = (status: Parameters<typeof Header>[0]['status'], loading = false) => {
+    const onRefresh = vi.fn();
+    render(<Header status={status} loading={loading} onRefresh={onRefresh} />);
+    return onRefresh;
+  };
+
+  it('shows the app name and that Steam is closed', () => {
+    renderHeader(okStatus);
+    expect(screen.getByRole('heading', { name: 'Steam Manager' })).toBeTruthy();
     expect(screen.getByText('Steam is closed')).toBeTruthy();
-    expect(screen.getByText('linux')).toBeTruthy();
   });
 
   it('warns when Steam is running', () => {
-    render(<StatusCard status={{ ...okStatus, steamRunning: true }} />);
-    expect(screen.getByText('Steam is running: close it before syncing')).toBeTruthy();
+    renderHeader({ ...okStatus, steamRunning: true });
+    expect(screen.getByText('Steam is running')).toBeTruthy();
   });
 
-  it('shows why Steam could not be found', () => {
-    render(<StatusCard status={{ platform: 'win32', steamRunning: false, error: 'Steam installation not found' }} />);
-    expect(screen.getByText('Steam installation not found')).toBeTruthy();
-    expect(screen.queryByText('Installation')).toBeNull();
+  it('says when Steam cannot be found, when nothing could be loaded, and while checking', () => {
+    renderHeader({ platform: 'linux', steamRunning: false, error: 'nope' });
+    expect(screen.getByText('Steam not found')).toBeTruthy();
+    cleanup();
+    renderHeader(undefined);
+    expect(screen.getByText('Not connected')).toBeTruthy();
+    cleanup();
+    renderHeader(undefined, true);
+    expect(screen.getByLabelText('Checking Steam')).toBeTruthy();
+  });
+
+  it('refreshes on demand', () => {
+    const onRefresh = renderHeader(okStatus);
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
   });
 });
 
-describe('ShortcutList', () => {
-  it('lists shortcuts with their tags and a managed badge', () => {
-    render(<ShortcutList shortcuts={shortcuts} />);
-    expect(screen.getByText('Non-Steam shortcuts (2)')).toBeTruthy();
+describe('Library', () => {
+  it('shows a game card per shortcut with its tags and origin', () => {
+    render(<Library shortcuts={shortcuts} loading={false} />);
+    expect(screen.getByRole('heading', { name: /Library/ }).textContent).toContain('2');
     expect(screen.getByText('Fortnite')).toBeTruthy();
     expect(screen.getByText('Epic Games')).toBeTruthy();
-    expect(screen.getAllByText('managed')).toHaveLength(1);
+    expect(screen.getByText('Synced').getAttribute('title')).toBe('Created by Steam Manager');
+    expect(screen.getByText('Yours').getAttribute('title')).toBe('Added by you');
     expect(screen.getByText('My Own Game')).toBeTruthy();
   });
 
-  it('shows an empty state', () => {
-    render(<ShortcutList shortcuts={[]} />);
-    expect(screen.getByText('No shortcuts yet.')).toBeTruthy();
+  it('shows placeholders while loading, without a count', () => {
+    render(<Library shortcuts={[]} loading />);
+    expect(screen.getByLabelText('Loading library').getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByRole('heading', { name: /Library/ }).textContent?.trim()).toBe('Library');
+  });
+
+  it('shows an empty state when there are no shortcuts', () => {
+    render(<Library shortcuts={[]} loading={false} />);
+    expect(screen.getByText('No games yet')).toBeTruthy();
+  });
+
+  it('filters by search, ignoring case, and says when nothing matches', () => {
+    render(<Library shortcuts={shortcuts} loading={false} />);
+    const search = screen.getByRole('searchbox', { name: 'Search games' });
+    fireEvent.change(search, { target: { value: '  FORT ' } });
+    expect(screen.getByText('Fortnite')).toBeTruthy();
+    expect(screen.queryByText('My Own Game')).toBeNull();
+
+    fireEvent.change(search, { target: { value: 'zelda' } });
+    expect(screen.getByText('No matches')).toBeTruthy();
+    expect(screen.getByText('Nothing in your library matches “zelda”.')).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: '' } });
+    expect(screen.getByText('My Own Game')).toBeTruthy();
   });
 });
 
@@ -67,82 +104,102 @@ describe('SyncPanel', () => {
     render(<SyncPanel integrations={integrations} disabled={false} onChanged={onChanged} {...props} />);
     return onChanged;
   };
-  const checkbox = (label: RegExp) => screen.getByLabelText(label) as HTMLInputElement;
+  const toggle = (label: RegExp) => screen.getByRole('switch', { name: label }) as HTMLInputElement;
+  const mode = (name: string) => screen.getByRole('radio', { name }) as HTMLButtonElement;
 
   it('lists the launchers it scans, or says there are none', () => {
     installApi();
     renderPanel();
-    expect(screen.getByText('Scans: Epic Games, GOG Galaxy')).toBeTruthy();
+    const launchers = within(screen.getByLabelText('Launchers scanned'));
+    expect(launchers.getByText('Epic Games')).toBeTruthy();
+    expect(launchers.getByText('GOG Galaxy')).toBeTruthy();
     cleanup();
     renderPanel({ integrations: [] });
-    expect(screen.getByText('Scans: nothing on this platform')).toBeTruthy();
+    expect(screen.getByText('No launchers on this platform')).toBeTruthy();
   });
 
-  it('starts with the safe defaults: dry run and artwork on, the rest off', () => {
+  it('starts in preview mode with artwork on and the rest off', () => {
     installApi();
     renderPanel();
-    expect(checkbox(/Dry run/).checked).toBe(true);
-    expect(checkbox(/Download artwork/).checked).toBe(true);
-    expect(checkbox(/Remove shortcuts/).checked).toBe(false);
-    expect(checkbox(/weak guesses/).checked).toBe(false);
-    expect(screen.getByRole('button', { name: 'Preview sync' })).toBeTruthy();
+    expect(mode('Preview').getAttribute('aria-checked')).toBe('true');
+    expect(mode('Apply').getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('Shows what would change. Nothing is written.')).toBeTruthy();
+    expect(toggle(/Download artwork/).checked).toBe(true);
+    expect(toggle(/Remove shortcuts/).checked).toBe(false);
+    expect(toggle(/weak guesses/).checked).toBe(false);
+    expect(screen.getByRole('button', { name: 'Preview changes' })).toBeTruthy();
   });
 
-  it('previews with the chosen options and shows counts and the log without refreshing', async () => {
+  it('switches to apply mode and says it writes to Steam', () => {
+    installApi();
+    renderPanel();
+    fireEvent.click(mode('Apply'));
+    expect(mode('Apply').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByText('Writes to Steam. Close Steam first.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Apply to Steam' })).toBeTruthy();
+    fireEvent.click(mode('Preview'));
+    expect(screen.getByRole('button', { name: 'Preview changes' })).toBeTruthy();
+  });
+
+  it('previews with the chosen switches, showing counts, a note and the log, without refreshing', async () => {
     const mock = installApi({
       sync: vi.fn(async () => ({ ...emptyReport, log: ['[dry run] Added:', '  Fortnite [Epic Games]'], added: [{ appId: 1, title: 'Fortnite', store: 'Epic Games' }] })),
     });
     const onChanged = renderPanel();
-    fireEvent.click(checkbox(/Remove shortcuts/));
-    fireEvent.click(checkbox(/Download artwork/));
-    fireEvent.click(screen.getByRole('button', { name: 'Preview sync' }));
+    fireEvent.click(toggle(/Remove shortcuts/));
+    fireEvent.click(toggle(/Download artwork/));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
 
-    await screen.findByText('1 added · 0 updated · 0 removed · 0 unchanged · 0 skipped');
+    await screen.findByLabelText('1 added');
+    expect(screen.getByLabelText('0 updated')).toBeTruthy();
     expect(mock.sync).toHaveBeenCalledWith({ dryRun: true, prune: true, includeMaybe: false, artwork: false });
-    expect(screen.getByText(/Fortnite \[Epic Games\]/)).toBeTruthy();
+    expect(screen.getByText('Preview only. Nothing was changed.')).toBeTruthy();
+    expect(screen.getByLabelText('Log').textContent).toContain('Fortnite [Epic Games]');
     expect(onChanged).not.toHaveBeenCalled();
   });
 
-  it('syncs for real after unchecking dry run, then asks the app to refresh', async () => {
+  it('applies for real, then asks the app to refresh', async () => {
     const mock = installApi();
     const onChanged = renderPanel();
-    fireEvent.click(checkbox(/Dry run/));
-    fireEvent.click(checkbox(/weak guesses/));
-    fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
+    fireEvent.click(mode('Apply'));
+    fireEvent.click(toggle(/weak guesses/));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to Steam' }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
     expect(mock.sync).toHaveBeenCalledWith({ dryRun: false, prune: false, includeMaybe: true, artwork: true });
+    expect(screen.queryByText('Preview only. Nothing was changed.')).toBeNull();
+    expect(screen.queryByLabelText('Log')).toBeNull();
   });
 
   it('shows the error in the report and does not refresh', async () => {
     installApi({ sync: vi.fn(async () => ({ ...emptyReport, error: 'Steam is running' })) });
     const onChanged = renderPanel();
-    fireEvent.click(checkbox(/Dry run/));
-    fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
-    await screen.findByText('Steam is running');
+    fireEvent.click(mode('Apply'));
+    fireEvent.click(screen.getByRole('button', { name: 'Apply to Steam' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('Steam is running');
     expect(onChanged).not.toHaveBeenCalled();
   });
 
   it('shows a failure thrown by the bridge', async () => {
     installApi({ sync: vi.fn(async () => { throw new Error("Error invoking remote method 'steam-manager:sync': Error: boom"); }) });
     renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Preview sync' }));
-    await screen.findByText('boom');
+    fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
+    expect((await screen.findByRole('alert')).textContent).toBe('boom');
   });
 
   it('disables the button while working', async () => {
     let finish: (value: typeof emptyReport) => void = () => undefined;
     installApi({ sync: vi.fn(() => new Promise((resolve) => { finish = resolve; })) });
     renderPanel();
-    fireEvent.click(screen.getByRole('button', { name: 'Preview sync' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
     const working = (await screen.findByRole('button', { name: 'Working…' })) as HTMLButtonElement;
     expect(working.disabled).toBe(true);
     finish(emptyReport);
-    await screen.findByRole('button', { name: 'Preview sync' });
+    await screen.findByRole('button', { name: 'Preview changes' });
   });
 
   it('is disabled when told to be (no Steam found)', () => {
     installApi();
     renderPanel({ disabled: true });
-    expect((screen.getByRole('button', { name: 'Preview sync' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Preview changes' }) as HTMLButtonElement).disabled).toBe(true);
   });
 });
