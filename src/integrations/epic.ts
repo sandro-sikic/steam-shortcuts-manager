@@ -35,7 +35,7 @@ function launchFor(manifest: Record<string, unknown>, appName: string): LaunchSp
 
   if (namespace !== undefined && itemId !== undefined) {
     const uri = `com.epicgames.launcher://apps/${namespace}%3A${itemId}%3A${appName}?action=launch&silent=true`;
-    return waitFor === undefined ? { kind: 'uri', uri } : { kind: 'uri', uri, waitFor };
+    return { kind: 'uri', uri, ...(waitFor === undefined ? {} : { waitFor }), ...(installDir === undefined ? {} : { installDir }) };
   }
   if (installDir !== undefined && executable !== undefined) {
     return { kind: 'exe', exe: path.join(installDir, executable), startDir: installDir };
@@ -102,7 +102,7 @@ async function scanInstallFolders(ctx: ScanContext, catalog: Catalog): Promise<G
         id: manifest.appName,
         title: item?.title ?? titleFromFolder(name),
         installed: true,
-        launch: waitFor === undefined ? { kind: 'uri', uri } : { kind: 'uri', uri, waitFor },
+        launch: { kind: 'uri', uri, ...(waitFor === undefined ? {} : { waitFor }), installDir: path.join(root, name) },
       });
     }
   }

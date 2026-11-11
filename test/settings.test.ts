@@ -14,7 +14,7 @@ describe('defaults', () => {
       steam: { dir: '', user: '', allowRunning: false },
       artwork: { kinds: ['poster', 'wide', 'hero', 'logo', 'icon'], auto: true, options: 5, nsfw: false },
       sync: { mode: 'preview', prune: false, includeMaybe: false, artwork: true, autoApply: false },
-      launchers: { disabled: [] },
+      launchers: { disabled: [], headless: true },
       ui: { theme: 'system', cardSize: 'medium' },
     });
   });
@@ -43,6 +43,7 @@ describe('applySettings', () => {
     expect(next.artwork).toEqual({ kinds: ['hero', 'poster'], auto: false, options: 20, nsfw: true });
     expect(applySettings(DEFAULT_SETTINGS, { artwork: { options: 1 } }).artwork.options).toBe(1);
     expect(next.launchers.disabled).toEqual(['riot', 'ea']);
+    expect(applySettings(DEFAULT_SETTINGS, { launchers: { headless: false } }).launchers.headless).toBe(false);
     expect(next.sync).toMatchObject({ prune: true, includeMaybe: true, artwork: false, autoApply: true });
     expect(applySettings(DEFAULT_SETTINGS, { steam: { user: '' } }).steam.user).toBe('');
     expect(applySettings(DEFAULT_SETTINGS, { artwork: { kinds: [] } }).artwork.kinds).toEqual([]);
@@ -64,6 +65,7 @@ describe('applySettings', () => {
     [{ ui: { theme: 'neon' } }, 'ui.theme must be one of: system, light, dark'],
     [{ artwork: { kinds: ['poster', 'banner'] } }, 'artwork.kinds must be a list of: poster, wide, hero, logo, icon'],
     [{ artwork: { kinds: 'poster' } }, 'artwork.kinds must be a list of'],
+    [{ launchers: { headless: 'yes' } }, 'launchers.headless must be true or false'],
     [{ launchers: { disabled: [1] } }, 'launchers.disabled must be a list of text'],
     [{ launchers: { disabled: 'riot' } }, 'launchers.disabled must be a list of text'],
   ])('rejects %j', (patch, message) => {

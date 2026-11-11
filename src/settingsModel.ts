@@ -37,6 +37,8 @@ export interface Settings {
   launchers: {
     /** Ids of launchers that are not scanned. */
     disabled: string[];
+    /** Windows: run the launcher scripts without a console window (through `conhost --headless`). */
+    headless: boolean;
   };
   ui: {
     theme: Theme;
@@ -48,7 +50,7 @@ export const DEFAULT_SETTINGS: Settings = {
   steam: { dir: '', user: '', allowRunning: false },
   artwork: { kinds: [...ARTWORK_KINDS], auto: true, options: 5, nsfw: false },
   sync: { mode: 'preview', prune: false, includeMaybe: false, artwork: true, autoApply: false },
-  launchers: { disabled: [] },
+  launchers: { disabled: [], headless: true },
   ui: { theme: 'system', cardSize: 'medium' },
 };
 
@@ -101,7 +103,7 @@ const FIELDS: { [S in keyof Settings]: { [K in keyof Settings[S]]: Field } } = {
   },
   artwork: { kinds: list(ARTWORK_KINDS), auto: flag, options: integer(1, 20), nsfw: flag },
   sync: { mode: choice(['preview', 'apply']), prune: flag, includeMaybe: flag, artwork: flag, autoApply: flag },
-  launchers: { disabled: list() },
+  launchers: { disabled: list(), headless: flag },
   ui: { theme: choice(['system', 'light', 'dark']), cardSize: choice(['small', 'medium', 'large']) },
 };
 

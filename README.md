@@ -63,8 +63,16 @@ Only shortcuts tagged `steam-manager` are ever modified or removed.
 | `heroic` | Heroic (Epic, GOG, Amazon) | Linux, Windows, macOS | `heroic://` URI |
 
 Launchers that must start the game themselves are started through a generated wrapper script
-(`.cmd` / `.sh` in the `steam-manager/launchers` config folder) that opens the launcher URI and waits
+(`.ps1` on Windows, `.sh` elsewhere, in the `steam-manager/launchers` config folder) that opens the launcher URI and waits
 for the game process, so Steam keeps showing the game as running.
+
+**On Windows** the wrapper is a PowerShell script that Steam runs through `conhost.exe --headless`, so no console window
+covers the game (Settings > Launchers turns this off, which runs PowerShell with a hidden window instead). It watches for
+any process running from the game's install folder (Epic games know theirs), or else for the process name, and stays alive
+until none is left for about six seconds. It also puts the game's processes into a Windows job object that is closed when
+the script ends, so Steam's **Stop** ends the game too. The script needs PowerShell 5.1 (built into Windows); it compiles a few
+lines of C# with `Add-Type` for the job object, which takes about a second at start. Run Sync again after updating: a
+changed target replaces the shortcut, and the old `.cmd` wrappers are left unused in the folder.
 
 ### Epic on Windows
 The Epic scan reads `ProgramData\Epic\EpicGamesLauncher\Data\Manifests\*.item`, and also the games' own folders:

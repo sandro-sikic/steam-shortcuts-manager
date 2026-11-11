@@ -153,9 +153,11 @@ function report(ctx: AppContext, result: SyncResult, duplicates: Duplicate[], dr
 /** Resolves each game's launch spec to a shortcut target, generating wrapper scripts as needed. */
 export async function resolveGames(ctx: AppContext, games: Game[], write: boolean): Promise<SyncGame[]> {
   const dir = wrapperDir(ctx.platform, ctx.home, ctx.env);
+  const { launchers } = await loadSettings(configDir(ctx.platform, ctx.home, ctx.env));
+  const systemRoot = ctx.env['SystemRoot'] ?? ctx.env['windir'];
   return Promise.all(
     games.map(async (game) => {
-      const target = await resolveTarget(game, { platform: ctx.platform, dir, write });
+      const target = await resolveTarget(game, { platform: ctx.platform, dir, write, headless: launchers.headless, systemRoot });
       return { store: game.store, title: game.title, installed: game.installed, ...target };
     }),
   );

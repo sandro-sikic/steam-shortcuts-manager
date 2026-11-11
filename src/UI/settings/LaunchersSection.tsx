@@ -5,8 +5,17 @@ import { Switch } from '../Switch.js';
 import type { SectionProps } from './types.js';
 
 export function LaunchersSection({ settings, update, integrations }: SectionProps & { integrations: IntegrationInfo[] }) {
-  const { disabled } = settings.launchers;
+  const { disabled, headless } = settings.launchers;
   const [error, setError] = useState('');
+
+  const setHeadless = async (on: boolean) => {
+    setError('');
+    try {
+      await update({ launchers: { headless: on } });
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  };
 
   const toggle = async (id: string, on: boolean) => {
     setError('');
@@ -32,6 +41,13 @@ export function LaunchersSection({ settings, update, integrations }: SectionProp
         ))
       )}
       <p className="help">Launchers that are turned off are skipped when scanning for games.</p>
+      <Switch checked={headless} onChange={(on) => void setHeadless(on)}>
+        Start launcher games without a window
+      </Switch>
+      <p className="help">
+        Windows only. Games that start through their launcher run from a script; this keeps its console window from covering the game.
+        Turn it off if such games do not start. Sync again to apply a change.
+      </p>
       {error && (
         <p className="status error" role="alert">
           {error}

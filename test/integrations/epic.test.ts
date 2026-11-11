@@ -59,6 +59,7 @@ describe('epic integration', () => {
           kind: 'uri',
           uri: 'com.epicgames.launcher://apps/nsAlpha%3AitemAlpha%3AAlpha?action=launch&silent=true',
           waitFor: 'Alpha Game.exe',
+          installDir: '/games/Alpha',
         },
       },
     ]);
@@ -73,6 +74,11 @@ describe('epic integration', () => {
     expect(games.map((g) => g.id)).toEqual(['Alpha', 'Beta']);
     for (const g of games) expect(g.launch).toMatchObject({ kind: 'uri' });
     for (const g of games) expect(g.launch).not.toHaveProperty('waitFor');
+  });
+
+  it('omits the install folder from a launcher link when the manifest has none', async () => {
+    const ctx = await setup('win32', { 'a.item': game('Alpha', { InstallLocation: undefined }) });
+    expect((await epicIntegration.scan(ctx))[0]?.launch).not.toHaveProperty('installDir');
   });
 
   it('falls back to a direct exe launch without catalog ids', async () => {
@@ -154,7 +160,7 @@ describe('epic integration', () => {
     }
 
     it('finds games without a list of installed games, with the title and ids from the launcher catalog', async () => {
-      const { ctx } = await machine(
+      const { ctx, programFiles } = await machine(
         { Automachef: manifest('Salt', 'Automachef.exe'), AstroDuel2: manifest('Pepper', 'AstroDuel2.exe') },
         catalog([
           { id: 'item1', namespace: 'ns1', title: 'Automachef', releaseInfo: [{ appId: 'Salt' }] },
@@ -162,16 +168,16 @@ describe('epic integration', () => {
         ]),
       );
       expect(await epicIntegration.scan(ctx)).toEqual([
-        { store: 'Epic Games', id: 'Pepper', title: 'Astro Duel 2', installed: true, launch: { kind: 'uri', uri: 'com.epicgames.launcher://apps/ns2%3Aitem2%3APepper?action=launch&silent=true', waitFor: 'AstroDuel2.exe' } },
-        { store: 'Epic Games', id: 'Salt', title: 'Automachef', installed: true, launch: { kind: 'uri', uri: 'com.epicgames.launcher://apps/ns1%3Aitem1%3ASalt?action=launch&silent=true', waitFor: 'Automachef.exe' } },
+        { store: 'Epic Games', id: 'Pepper', title: 'Astro Duel 2', installed: true, launch: { kind: 'uri', uri: 'com.epicgames.launcher://apps/ns2%3Aitem2%3APepper?action=launch&silent=true', waitFor: 'AstroDuel2.exe', installDir: path.join(programFiles, 'Epic Games', 'AstroDuel2') } },
+        { store: 'Epic Games', id: 'Salt', title: 'Automachef', installed: true, launch: { kind: 'uri', uri: 'com.epicgames.launcher://apps/ns1%3Aitem1%3ASalt?action=launch&silent=true', waitFor: 'Automachef.exe', installDir: path.join(programFiles, 'Epic Games', 'Automachef') } },
       ]);
     });
 
     it('uses the folder name as the title and the short launcher link when the catalog does not know the game', async () => {
-      const { ctx } = await machine({ AstroDuel2: manifest('Pepper', 'Bin/Astro Duel;2.exe'), Automachef: manifest('Salt', 'Automachef.exe') });
+      const { ctx, programFiles } = await machine({ AstroDuel2: manifest('Pepper', 'Bin/Astro Duel;2.exe'), Automachef: manifest('Salt', 'Automachef.exe') });
       const games = await epicIntegration.scan(ctx);
       expect(games.map((g) => g.title)).toEqual(['Astro Duel 2', 'Automachef']);
-      expect(games[0]?.launch).toEqual({ kind: 'uri', uri: 'com.epicgames.launcher://apps/Pepper?action=launch&silent=true' });
+      expect(games[0]?.launch).toEqual({ kind: 'uri', uri: 'com.epicgames.launcher://apps/Pepper?action=launch&silent=true', installDir: path.join(programFiles, 'Epic Games', 'AstroDuel2') });
     });
 
     it('skips the launcher and redistributables, folders without a readable manifest, and games without an executable', async () => {

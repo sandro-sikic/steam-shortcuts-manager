@@ -7,7 +7,7 @@ import { integrations, settings } from '../mockApi.js';
 
 afterEach(cleanup);
 
-const withDisabled = (disabled: string[]): Settings => ({ ...settings, launchers: { disabled } });
+const withDisabled = (disabled: string[], headless = true): Settings => ({ ...settings, launchers: { disabled, headless } });
 const setup = (s = settings, list: IntegrationInfo[] = integrations, update = vi.fn(async () => undefined)) => {
   render(<LaunchersSection settings={s} update={update} integrations={list} />);
   return update;
@@ -31,10 +31,28 @@ describe('LaunchersSection', () => {
     await waitFor(() => expect(update).toHaveBeenCalledWith({ launchers: { disabled: [] } }));
   });
 
+  it('has a switch for starting launcher games without a window, and saves it', async () => {
+    const update = setup(withDisabled([], true));
+    expect(sw('Start launcher games without a window').checked).toBe(true);
+    fireEvent.click(sw('Start launcher games without a window'));
+    await waitFor(() => expect(update).toHaveBeenCalledWith({ launchers: { headless: false } }));
+    cleanup();
+    const again = setup(withDisabled([], false));
+    expect(sw('Start launcher games without a window').checked).toBe(false);
+    fireEvent.click(sw('Start launcher games without a window'));
+    await waitFor(() => expect(again).toHaveBeenCalledWith({ launchers: { headless: true } }));
+  });
+
+  it('shows a failed save of that switch', async () => {
+    setup(settings, integrations, vi.fn().mockRejectedValue(new Error('Cannot save')));
+    fireEvent.click(sw('Start launcher games without a window'));
+    expect((await screen.findByRole('alert')).textContent).toBe('Cannot save');
+  });
+
   it('says when there are no launchers', () => {
     setup(settings, []);
     expect(screen.getByText('No launchers on this platform.')).toBeTruthy();
-    expect(screen.queryByRole('switch')).toBeNull();
+    expect(screen.getAllByRole('switch').map((s) => s.getAttribute('aria-label') ?? s.closest('label')?.textContent)).toEqual(['Start launcher games without a window']);
   });
 
   it('shows a failed save and clears it on the next try', async () => {

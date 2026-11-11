@@ -16,6 +16,11 @@ export interface UriLaunch {
   uri: string;
   /** Process name of the game, so the wrapper can wait for it and Steam sees the game as running. */
   waitFor?: string;
+  /**
+   * Folder the game is installed in. On Windows the wrapper then watches for any process running from it, which
+   * also covers launcher stubs and child processes, and ends them when Steam stops the shortcut.
+   */
+  installDir?: string;
 }
 
 export type LaunchSpec = ExeLaunch | UriLaunch;
