@@ -1,7 +1,7 @@
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { listDir, pathExists, readJsonIfExists, readTextIfExists } from '../../src/integrations/shared/fs.js';
+import { listDir, pathExists, readBytesIfExists, readJsonIfExists, readTextIfExists } from '../../src/integrations/shared/fs.js';
 import { cleanupTempDirs, makeTempDir } from '../helpers.js';
 
 afterEach(cleanupTempDirs);
@@ -57,5 +57,20 @@ describe('integration fs helpers', () => {
     const dir = await makeTempDir();
     expect(await pathExists(dir)).toBe(true);
     expect(await pathExists(path.join(dir, 'nope'))).toBe(false);
+  });
+});
+
+describe('readBytesIfExists', () => {
+  it('reads a file as bytes, and is undefined when it is missing or not a file', async () => {
+    const dir = await makeTempDir();
+    await writeFile(path.join(dir, 'a.bin'), Buffer.from([1, 2, 3]));
+    expect(await readBytesIfExists(path.join(dir, 'a.bin'))).toEqual(Buffer.from([1, 2, 3]));
+    expect(await readBytesIfExists(path.join(dir, 'missing'))).toBeUndefined();
+    expect(await readBytesIfExists(dir)).toBeUndefined();
+    expect(await readBytesIfExists(path.join(dir, 'a.bin', 'child'))).toBeUndefined();
+  });
+
+  it('passes on errors that are not about a missing file', async () => {
+    await expect(readBytesIfExists('bad\0name')).rejects.toThrow();
   });
 });

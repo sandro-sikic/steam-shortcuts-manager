@@ -3,6 +3,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { epicIntegration } from '../../src/integrations/epic.js';
 import type { ScanContext } from '../../src/integrations/types.js';
+import { deflateSync } from 'node:zlib';
 import { cleanupTempDirs, makeTempDir } from '../helpers.js';
 
 afterEach(cleanupTempDirs);
@@ -114,5 +115,97 @@ describe('epic integration', () => {
     const root = await makeTempDir();
     const games = await epicIntegration.scan({ platform: 'win32', home: root, env: {}, run: async () => '' });
     expect(games).toEqual([]);
+  });
+
+  describe('install folders', () => {
+    const fstr = (value: string): Buffer => {
+      const bytes = Buffer.from(`${value}\0`, 'latin1');
+      const length = Buffer.alloc(4);
+      length.writeInt32LE(value === '' ? 0 : bytes.length);
+      return value === '' ? length : Buffer.concat([length, bytes]);
+    };
+    /** A binary manifest like the launcher's, naming the game and its executable. */
+    const manifest = (appName: string, exe: string): Buffer => {
+      const fixed = Buffer.alloc(14);
+      const body = deflateSync(Buffer.concat([fixed, fstr(appName), fstr('1.0'), fstr(exe), fstr('')]));
+      const header = Buffer.alloc(41);
+      header.writeUInt32LE(0x44bec00c, 0);
+      header.writeUInt32LE(41, 4);
+      header.writeUInt8(1, 36);
+      return Buffer.concat([header, body]);
+    };
+    const catalog = (items: object[]) => Buffer.from(Buffer.from(JSON.stringify(items)).toString('base64'));
+
+    /** A Windows machine with Epic's data and game folders, but no `.item` manifests. */
+    async function machine(games: Record<string, Buffer | null>, catcache?: Buffer) {
+      const root = await makeTempDir();
+      const programFiles = path.join(root, 'Program Files');
+      for (const [folder, data] of Object.entries(games)) {
+        const store = path.join(programFiles, 'Epic Games', folder, '.egstore');
+        await mkdir(store, { recursive: true });
+        if (data) await writeFile(path.join(store, 'ABC123.manifest'), data);
+      }
+      if (catcache) {
+        await mkdir(path.join(root, 'Epic', 'EpicGamesLauncher', 'Data', 'Catalog'), { recursive: true });
+        await writeFile(path.join(root, 'Epic', 'EpicGamesLauncher', 'Data', 'Catalog', 'catcache.bin'), catcache);
+      }
+      const ctx: ScanContext = { platform: 'win32', home: root, env: { ProgramData: root, ProgramFiles: programFiles }, run: async () => '' };
+      return { ctx, programFiles };
+    }
+
+    it('finds games without a list of installed games, with the title and ids from the launcher catalog', async () => {
+      const { ctx } = await machine(
+        { Automachef: manifest('Salt', 'Automachef.exe'), AstroDuel2: manifest('Pepper', 'AstroDuel2.exe') },
+        catalog([
+          { id: 'item1', namespace: 'ns1', title: 'Automachef', releaseInfo: [{ appId: 'Salt' }] },
+          { id: 'item2', namespace: 'ns2', title: 'Astro Duel 2', customAttributes: { FolderName: { value: 'AstroDuel2' } } },
+        ]),
+      );
+      expect(await epicIntegration.scan(ctx)).toEqual([
+        { store: 'Epic Games', id: 'Pepper', title: 'Astro Duel 2', installed: true, launch: { kind: 'uri', uri: 'com.epicgames.launcher://apps/ns2%3Aitem2%3APepper?action=launch&silent=true', waitFor: 'AstroDuel2.exe' } },
+        { store: 'Epic Games', id: 'Salt', title: 'Automachef', installed: true, launch: { kind: 'uri', uri: 'com.epicgames.launcher://apps/ns1%3Aitem1%3ASalt?action=launch&silent=true', waitFor: 'Automachef.exe' } },
+      ]);
+    });
+
+    it('uses the folder name as the title and the short launcher link when the catalog does not know the game', async () => {
+      const { ctx } = await machine({ AstroDuel2: manifest('Pepper', 'Bin/Astro Duel;2.exe'), Automachef: manifest('Salt', 'Automachef.exe') });
+      const games = await epicIntegration.scan(ctx);
+      expect(games.map((g) => g.title)).toEqual(['Astro Duel 2', 'Automachef']);
+      expect(games[0]?.launch).toEqual({ kind: 'uri', uri: 'com.epicgames.launcher://apps/Pepper?action=launch&silent=true' });
+    });
+
+    it('skips the launcher and redistributables, folders without a readable manifest, and games without an executable', async () => {
+      const { ctx } = await machine({
+        Launcher: manifest('Launcher', 'EpicGamesLauncher.exe'),
+        DirectXRedist: manifest('Redist', 'dx.exe'),
+        GameInputRedist: manifest('Input', 'in.exe'),
+        NoStore: null,
+        Broken: Buffer.from('garbage'),
+        Tool: manifest('Tool', ''),
+        Real: manifest('Real', 'Real.exe'),
+      });
+      expect((await epicIntegration.scan(ctx)).map((g) => g.id)).toEqual(['Real']);
+    });
+
+    it('does not add a game the manifests already listed, and ignores folders on other platforms', async () => {
+      const { ctx } = await machine({ Automachef: manifest('Salt', 'Automachef.exe') });
+      const dir = path.join(ctx.env['ProgramData'] as string, 'Epic', 'EpicGamesLauncher', 'Data', 'Manifests');
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, 'a.item'), JSON.stringify(game('Salt', { DisplayName: 'From the manifest' })));
+      expect((await epicIntegration.scan(ctx)).map((g) => g.title)).toEqual(['From the manifest']);
+      expect(await epicIntegration.scan({ ...ctx, platform: 'darwin', home: ctx.home })).toEqual([]);
+    });
+
+    it('looks in the Program Files variants and in Epic Games folders on any drive', async () => {
+      const { ctx } = await machine({});
+      const other = path.join(ctx.home, 'Other');
+      await mkdir(path.join(other, 'Epic Games', 'Elsewhere', '.egstore'), { recursive: true });
+      await writeFile(path.join(other, 'Epic Games', 'Elsewhere', '.egstore', 'X.manifest'), manifest('Else', 'e.exe'));
+      for (const variable of ['ProgramFiles', 'ProgramW6432', 'ProgramFiles(x86)']) {
+        const found = await epicIntegration.scan({ ...ctx, env: { ProgramData: ctx.home, [variable]: other } });
+        expect(found.map((g) => g.id)).toEqual(['Else']);
+      }
+      expect(await epicIntegration.scan({ ...ctx, env: { ProgramData: ctx.home } })).toEqual([]);
+    });
   });
 });

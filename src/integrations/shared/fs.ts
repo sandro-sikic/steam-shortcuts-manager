@@ -41,3 +41,14 @@ export async function pathExists(target: string): Promise<boolean> {
     return false;
   }
 }
+
+/** Reads a file's bytes; undefined when it does not exist (or is not a regular file). */
+export async function readBytesIfExists(file: string): Promise<Buffer | undefined> {
+  try {
+    return await readFile(file);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT' || code === 'ENOTDIR' || code === 'EISDIR') return undefined;
+    throw error;
+  }
+}

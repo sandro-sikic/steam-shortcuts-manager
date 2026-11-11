@@ -66,6 +66,14 @@ Launchers that must start the game themselves are started through a generated wr
 (`.cmd` / `.sh` in the `steam-manager/launchers` config folder) that opens the launcher URI and waits
 for the game process, so Steam keeps showing the game as running.
 
+### Epic on Windows
+The Epic scan reads `ProgramData\Epic\EpicGamesLauncher\Data\Manifests\*.item`, and also the games' own folders:
+`Epic Games\<game>\.egstore\*.manifest` under every Program Files folder and every drive. That second source was added
+after a real install (launcher 2026) had no `Manifests` folder and an empty `LauncherInstalled.dat`. The manifest gives the app
+name and executable, and `Data\Catalog\catcache.bin` the title and ids; without a catalog entry the folder name is the title
+(`AstroDuel2` shows as "Astro Duel 2"). The binary manifest layout was checked against a real file's header only, so the
+executable and app name fields are the least certain part.
+
 ### Not verified on real machines
 The tests use fixture files and fake registry output. Each integration file starts with an
 `// Unverified:` note listing its assumptions. Least certain: EA app (registry layout), Battle.net
