@@ -1,7 +1,32 @@
+import { amazonIntegration } from './amazon.js';
+import { battlenetIntegration } from './battlenet.js';
+import { eaIntegration } from './ea.js';
+import { epicIntegration } from './epic.js';
+import { gogIntegration } from './gog.js';
+import { heroicIntegration } from './heroic.js';
+import { itchIntegration } from './itch.js';
+import { minecraftIntegration } from './minecraft.js';
+import { riotIntegration } from './riot.js';
+import { rockstarIntegration } from './rockstar.js';
+import { ubisoftIntegration } from './ubisoft.js';
+import { xboxIntegration } from './xbox.js';
 import type { Integration } from './types.js';
 
 /** Every known integration, one per file. */
-export const integrations: Integration[] = [];
+export const integrations: Integration[] = [
+  amazonIntegration,
+  battlenetIntegration,
+  eaIntegration,
+  epicIntegration,
+  gogIntegration,
+  heroicIntegration,
+  itchIntegration,
+  minecraftIntegration,
+  riotIntegration,
+  rockstarIntegration,
+  ubisoftIntegration,
+  xboxIntegration,
+];
 
 /** The integrations that make sense on a platform. */
 export function availableIntegrations(platform: NodeJS.Platform, all: Integration[] = integrations): Integration[] {

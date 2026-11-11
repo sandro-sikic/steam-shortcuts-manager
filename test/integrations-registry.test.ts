@@ -22,9 +22,24 @@ describe('integration registry', () => {
     expect(() => selectIntegrations('darwin', ['x'], all)).toThrow('Available here: none');
   });
 
-  it('exposes the real registry (unique ids, valid platforms)', () => {
-    const ids = integrations.map((i) => i.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(availableIntegrations('linux').length).toBeLessThanOrEqual(integrations.length);
+  it('registers every launcher with unique ids, labels and the platforms we support', () => {
+    expect(integrations.map((i) => i.id).sort()).toEqual([
+      'amazon', 'battlenet', 'ea', 'epic', 'gog', 'heroic', 'itch', 'minecraft', 'riot', 'rockstar', 'ubisoft', 'xbox',
+    ]);
+    expect(new Set(integrations.map((i) => i.label)).size).toBe(integrations.length);
+    for (const integration of integrations) {
+      expect(integration.id).toMatch(/^[a-z]+$/);
+      expect(integration.label).not.toBe('');
+      expect(integration.platforms.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('offers the expected launchers per platform', () => {
+    const ids = (platform: NodeJS.Platform) => availableIntegrations(platform).map((i) => i.id).sort();
+    expect(ids('linux')).toEqual(['heroic', 'itch', 'minecraft']);
+    expect(ids('darwin')).toEqual(['epic', 'heroic', 'itch']);
+    expect(ids('win32')).toEqual([
+      'amazon', 'battlenet', 'ea', 'epic', 'gog', 'heroic', 'itch', 'minecraft', 'riot', 'rockstar', 'ubisoft', 'xbox',
+    ]);
   });
 });
