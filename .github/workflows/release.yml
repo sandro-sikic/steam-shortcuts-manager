@@ -41,11 +41,15 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version counts commits
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The version is major.minor from package.json plus the number of commits; the app shows it in About.
+      - run: node scripts/version.mjs --write
       # The .deb needs a project homepage; use this repository.
       - run: npm pkg set homepage="https://github.com/${{ github.repository }}"
         shell: bash
@@ -63,6 +67,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -71,9 +77,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version=$(node -p "require('./package.json').version")
-          tag="v${version}-build.${{ github.run_number }}"
-          gh release create "$tag" artifacts/* \
+          version=$(node scripts/version.mjs)
+          gh release create "v${version}" artifacts/* \
             --target "${{ github.sha }}" \
-            --title "Steam Manager ${version} (build ${{ github.run_number }})" \
+            --title "Steam Manager ${version}" \
             --generate-notes

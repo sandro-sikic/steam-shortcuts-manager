@@ -37,5 +37,7 @@ describe('packaging', () => {
     expect(workflow).toMatch(/needs: package/);
     expect(workflow).toMatch(/permissions:\s+contents: write/);
     expect(workflow).toContain('gh release create');
+    expect(workflow).toContain('node scripts/version.mjs --write'); // before packaging
+    expect(workflow).toContain('fetch-depth: 0'); // all commits, to count them
   });
 });

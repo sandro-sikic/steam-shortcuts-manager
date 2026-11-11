@@ -198,5 +198,9 @@ bootstrap code verified by launching the app), `npm run typecheck`.
   Building the Windows packages on Linux needs Wine, so build them on Windows or let CI do it. The deb needs a project
   homepage: set `homepage` in `package.json` (CI sets it to the repository).
 - `.github/workflows/release.yml` runs on every push to `main`: typecheck and tests with 100% coverage, then the Linux and
-  Windows packages on their own runners, then a GitHub release named `v<version>-build.<run number>` with the files attached.
+  Windows packages on their own runners, then a GitHub release named `v<version>` with the files attached.
+  **Versions:** the build version is the major and minor from `package.json` plus the number of commits as the patch
+  (`0.1.0` with 18 commits builds as `0.1.18`), so every commit on `main` gets a higher version. `node scripts/version.mjs`
+  prints it and `--write` puts it into `package.json`; CI does that before packaging, so the installer file names and
+  Settings > About show it. Change the major or minor in `package.json` by hand for bigger releases.
   The apps are not code-signed, so Windows SmartScreen may warn on first run.
