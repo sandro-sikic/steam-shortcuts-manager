@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, protocol, safeStorage, shell } from 'elect
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createApi, createArtworkServer, systemDeps, type ApiDeps } from '../src/api.js';
+import { displayVersion } from '../src/version.js';
 import { ARTWORK_SCHEME } from '../src/artwork/files.js';
 import { configDir } from '../src/config.js';
 import { registerIpc } from '../src/ipc.js';
@@ -61,7 +62,7 @@ function createWindow(): void {
 app.whenReady().then(() => {
   const deps: ApiDeps = {
     ...systemDeps(),
-    version: app.getVersion(),
+    version: displayVersion(app.getVersion()),
     openPath: async (folder) => {
       const error = await shell.openPath(folder);
       if (error) throw new Error(error);

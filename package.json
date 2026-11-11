@@ -1,6 +1,6 @@
 {
   "name": "steam-manager",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "Add games from other launchers to Steam as non-Steam shortcuts, with tags and SteamGridDB artwork",
   "type": "module",
   "bin": {

@@ -48,7 +48,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # The version is major.minor from package.json plus the number of commits; the app shows it in About.
+      # The version is the number of commits on main; the app shows it in About.
       - run: node scripts/version.mjs --write
       # The .deb needs a project homepage; use this repository.
       - run: npm pkg set homepage="https://github.com/${{ github.repository }}"
@@ -78,7 +78,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           version=$(node scripts/version.mjs)
-          gh release create "v${version}" artifacts/* \
+          gh release create "v${version#0.0.}" artifacts/* \
             --target "${{ github.sha }}" \
-            --title "Steam Manager ${version}" \
+            --title "Steam Manager ${version#0.0.}" \
             --generate-notes
