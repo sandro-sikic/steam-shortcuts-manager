@@ -17,5 +17,5 @@ export default defineConfig({
   base: './',
   plugins: [react(), contentSecurityPolicy],
   build: { outDir: '../../dist-ui', emptyOutDir: true },
-  server: { port: 5173, strictPort: true },
+  server: { port: 5173, strictPort: true, allowedHosts: ['devserver'] },
 });
