@@ -2,15 +2,16 @@ import os from 'node:os';
 import { configDir, configFile, loadConfig, updateConfig } from './config.js';
 import { mkdir } from 'node:fs/promises';
 import { ARTWORK_KINDS } from './artwork/kinds.js';
-import { artworkCacheDir, fillCache, isPending, readCache, readCachedArtwork } from './artwork/cache.js';
+import { artworkCacheDir, cacheKey, choicesFor, ensureArtwork, fileKey, isPending, optionsReady, readCache, readCachedArtwork, selection, visibleCandidates, type ArtworkPrefs } from './artwork/cache.js';
 import { artworkUrl, ARTWORK_SCHEME, cacheArtworkUrl, listArtwork, readArtworkFile, type ArtworkResponse } from './artwork/files.js';
+import type { ArtworkKind } from './artwork/kinds.js';
 import { SteamGridDbClient } from './artwork/steamgriddb.js';
 import { loadSettings, resetSettings, updateSettings } from './settings.js';
 import { SECURE_STORAGE_UNAVAILABLE, type SecretStore } from './secrets.js';
 import { openUser, resolveGames, runSync, scanApps, scanIntegrations, knownGames, type AppContext } from './app.js';
 import { dedupeGames, gameKey, type KnownGames } from './dedupe.js';
 import { availableIntegrations, integrations } from './integrations/index.js';
-import type { AboutInfo, ApiKeyStatus, ApiKeyTest, AppInfo, ArtworkEntry, ArtworkGame, ArtworkItem, ArtworkRequest, ArtworkResult, GamesReport, GamesRequest, IntegrationInfo, Lists, Settings, SettingsPatch, ShortcutInfo, SteamAccountInfo, SteamManagerApi, StatusInfo, SyncReport, SyncRequest } from './ipc.js';
+import type { AboutInfo, ApiKeyStatus, ApiKeyTest, AppInfo, ArtworkChoice, ArtworkEntry, ArtworkGame, ArtworkItem, ArtworkPick, ArtworkPickResult, ArtworkRequest, ArtworkResult, GamesReport, GamesRequest, IntegrationInfo, Lists, Settings, SettingsPatch, ShortcutInfo, SteamAccountInfo, SteamManagerApi, StatusInfo, SyncReport, SyncRequest } from './ipc.js';
 import { findSteamRoot, listAccounts } from './steam/locate.js';
 import { defaultRunner, isSteamRunning } from './steam/running.js';
 import { computeAppId, isManaged, MANAGED_TAG, quote, shortcutAppId, shortcutTags, shortcutTitle } from './steam/shortcuts.js';
@@ -29,6 +30,7 @@ export type ApiDeps = Omit<AppContext, 'log'> & {
 };
 
 const API_KEY = 'steamgriddb';
+const NO_KEY_MESSAGE = 'Add a SteamGridDB API key in Settings to download artwork.';
 
 /** The real machine: used by the Electron app. */
 export function systemDeps(): ApiDeps {
@@ -74,6 +76,15 @@ export function parseArtworkRequest(value: unknown): ArtworkRequest {
   return { appId, title: title.trim(), force: request['force'] === true };
 }
 
+/** Validates an artwork pick that came from the (untrusted) renderer. */
+export function parseArtworkPick(value: unknown): ArtworkPick {
+  const { appId, title } = parseArtworkRequest(value);
+  const { kind, imageId } = value as Record<string, unknown>;
+  if (!ARTWORK_KINDS.includes(kind as ArtworkKind)) throw new Error('Invalid artwork pick: unknown image type');
+  if (imageId !== null && !(typeof imageId === 'number' && Number.isInteger(imageId) && imageId >= 0)) throw new Error('Invalid artwork pick: imageId must be a whole number or null');
+  return { appId, title, kind: kind as ArtworkKind, imageId: imageId as number | null };
+}
+
 /**
  * Answers requests for `steam-manager-art://grid/<file>` (Steam's grid folder) and
  * `steam-manager-art://cache/<game>/<file>` (the app's artwork cache). Used by the desktop app so the
@@ -115,7 +126,12 @@ export function createApi(deps: ApiDeps): SteamManagerApi {
     return (await deps.secrets?.get(API_KEY)) || deps.env['STEAMGRIDDB_API_KEY'] || undefined;
   }
 
-  /** What each game has: the image in Steam's grid folder if there is one, else the app's cached copy. */
+  async function artworkPrefs(): Promise<ArtworkPrefs> {
+    const { artwork: settings } = await loadSettings(dir());
+    return { options: settings.options, nsfw: settings.nsfw };
+  }
+
+  /** What each game has: the selected image of each type and the options behind it; reads local files only. */
   async function artwork(games: ArtworkGame[]): Promise<Record<number, ArtworkEntry>> {
     if (!Array.isArray(games) || games.some((game) => !Number.isInteger(game?.appId) || typeof game.title !== 'string')) throw new Error('Invalid games');
     let grid: Awaited<ReturnType<typeof listArtwork>> = [];
@@ -124,17 +140,59 @@ export function createApi(deps: ApiDeps): SteamManagerApi {
     } catch {
       // without Steam there is only the cache
     }
+    const prefs = await artworkPrefs();
+    const { artworkChoices } = await loadConfig(dir());
     const cacheRoot = artworkCacheDir(dir());
     const now = Date.now();
     const found: Record<number, ArtworkEntry> = {};
     for (const { appId, title } of games) {
-      const items = new Map<ArtworkItem['kind'], ArtworkItem>();
       const cached = await readCache(cacheRoot, title);
-      for (const [kind, { file, version }] of cached?.files ?? []) items.set(kind, { kind, url: cacheArtworkUrl(cached?.key as string, file, version) });
-      for (const file of grid.filter((candidate) => candidate.appId === appId)) items.set(file.kind, { kind: file.kind, url: artworkUrl(file.file, file.version) });
-      found[appId] = { items: ARTWORK_KINDS.filter((kind) => items.has(kind)).map((kind) => items.get(kind) as ArtworkItem), pending: isPending(cached, now) };
+      const choices = choicesFor(artworkChoices, title);
+      const url = (file: { file: string; version: number }): string => cacheArtworkUrl(cached?.key as string, file.file, file.version);
+      const entry: ArtworkEntry = { items: [], choices: {}, pending: isPending(cached, choices, prefs, now), optionsReady: optionsReady(cached, prefs, now) };
+      for (const kind of ARTWORK_KINDS) {
+        const options = cached?.meta.options[kind];
+        const picked = selection(options, choices?.[kind], prefs);
+        if (options !== undefined) {
+          const choice: ArtworkChoice = {
+            options: visibleCandidates(options, prefs).map((candidate) => {
+              const thumb = cached?.thumbs.get(fileKey(kind, candidate.id));
+              const full = cached?.full.get(fileKey(kind, candidate.id));
+              return { id: candidate.id, style: candidate.style, width: candidate.width, height: candidate.height, nsfw: candidate.nsfw, thumbUrl: thumb && url(thumb), fullUrl: full && url(full) };
+            }),
+            selected: picked.none ? null : picked.candidate?.id,
+          };
+          entry.choices[kind] = choice;
+        }
+        if (picked.none) continue; // the user wants no image of this type
+        const selected = picked.candidate === undefined ? undefined : entry.choices[kind]?.options.find((option) => option.id === picked.candidate?.id);
+        const legacy = cached?.legacy.get(kind);
+        const stored = grid.find((file) => file.appId === appId && file.kind === kind);
+        const shown = selected?.fullUrl ?? selected?.thumbUrl ?? (legacy && url(legacy)) ?? (stored && artworkUrl(stored.file, stored.version));
+        if (shown !== undefined) entry.items.push({ kind, url: shown });
+      }
+      found[appId] = entry;
     }
     return found;
+  }
+
+  /** Lists a game's options and downloads the selected images (and, when asked, a preview of every option). */
+  async function fill(request: ArtworkRequest, thumbs: boolean): Promise<ArtworkResult> {
+    const { appId, title, force } = parseArtworkRequest(request);
+    const key = await apiKey();
+    if (!key) throw new Error(NO_KEY_MESSAGE);
+    const { artworkChoices } = await loadConfig(dir());
+    const outcomes = await ensureArtwork({
+      cacheRoot: artworkCacheDir(dir()),
+      title,
+      client: new SteamGridDbClient(key, deps.fetchFn),
+      fetchFn: deps.fetchFn,
+      prefs: await artworkPrefs(),
+      choices: choicesFor(artworkChoices, title),
+      force,
+      thumbs,
+    });
+    return { outcomes: outcomes.map(({ kind, status, error }) => ({ kind, status, error })), entry: (await artwork([{ appId, title }]))[appId] as ArtworkEntry };
   }
 
   async function apiKeyStatus(): Promise<ApiKeyStatus> {
@@ -307,13 +365,32 @@ export function createApi(deps: ApiDeps): SteamManagerApi {
 
     artwork,
 
-    async downloadArtwork(request: ArtworkRequest): Promise<ArtworkResult> {
-      const { appId, title, force } = parseArtworkRequest(request);
+    downloadArtwork: (request: ArtworkRequest) => fill(request, false),
+
+    loadArtworkOptions: (request: ArtworkRequest) => fill(request, true),
+
+    async chooseArtwork(pick: ArtworkPick): Promise<ArtworkPickResult> {
+      const { appId, title, kind, imageId } = parseArtworkPick(pick);
+      const cacheKeyOfGame = cacheKey(title);
+      if (cacheKeyOfGame === undefined) throw new Error('This game has no title to keep artwork choices under.');
+      const { artworkChoices } = await loadConfig(dir());
+      const saved = { ...artworkChoices, [cacheKeyOfGame]: { ...artworkChoices[cacheKeyOfGame], [kind]: imageId } };
+      await updateConfig(dir(), { artworkChoices: saved });
+
+      // Fetch the full image now, so the choice shows at once; the pick stays saved if that fails.
+      let downloadError: string | undefined;
+      const prefs = await artworkPrefs();
       const key = await apiKey();
-      if (!key) throw new Error('Add a SteamGridDB API key in Settings to download artwork.');
-      const outcomes = await fillCache({ cacheRoot: artworkCacheDir(dir()), title, client: new SteamGridDbClient(key, deps.fetchFn), fetchFn: deps.fetchFn, force });
-      const { items, pending } = (await artwork([{ appId, title }]))[appId] as ArtworkEntry;
-      return { outcomes: outcomes.map(({ kind, status, error }) => ({ kind, status, error })), items, pending };
+      const cached = await readCache(artworkCacheDir(dir()), title);
+      const chosen = selection(cached?.meta.options[kind], imageId, prefs).candidate;
+      const haveFull = imageId === null || (chosen !== undefined && cached?.full.has(fileKey(kind, chosen.id)) === true);
+      if (key) {
+        const outcome = (await ensureArtwork({ cacheRoot: artworkCacheDir(dir()), title, client: new SteamGridDbClient(key, deps.fetchFn), fetchFn: deps.fetchFn, prefs, choices: saved[cacheKeyOfGame] })).find((o) => o.kind === kind);
+        if (outcome?.status === 'failed') downloadError = outcome.error;
+      } else if (!haveFull) {
+        downloadError = NO_KEY_MESSAGE;
+      }
+      return { entry: (await artwork([{ appId, title }]))[appId] as ArtworkEntry, downloadError };
     },
 
     async sync(request: SyncRequest): Promise<SyncReport> {

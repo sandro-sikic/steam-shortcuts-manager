@@ -1,6 +1,6 @@
 import { ARTWORK_KINDS } from '../artwork/kinds.js';
 import { coverHue, initials } from './cover.js';
-import type { ApiKeyStatus, AppInfo, ArtworkEntry, ArtworkItem, ArtworkKind, GameInfo, GamesReport, Lists, ShortcutInfo, SteamManagerApi, SyncItemInfo, SyncReport, SyncRequest } from '../ipc.js';
+import type { ApiKeyStatus, AppInfo, ArtworkChoice, ArtworkEntry, ArtworkKind, ArtworkResult, GameInfo, GamesReport, Lists, ShortcutInfo, SteamManagerApi, SyncItemInfo, SyncReport, SyncRequest } from '../ipc.js';
 import { applySettings, DEFAULT_SETTINGS } from '../settingsModel.js';
 
 interface DemoGame {
@@ -26,10 +26,11 @@ const keyOf = (game: DemoGame): string => `${game.store}:${game.id}`;
 const IMAGE_SIZE: Record<ArtworkKind, [number, number]> = { poster: [600, 900], wide: [920, 430], hero: [1920, 620], logo: [800, 310], icon: [256, 256] };
 
 /** A generated stand-in for a SteamGridDB image: coloured by the title, labelled with it. */
-function demoImage(kind: ArtworkKind, title: string): string {
+function demoImage(kind: ArtworkKind, title: string, variant = 0): string {
   const [width, height] = IMAGE_SIZE[kind];
-  const hue = coverHue(title);
-  const label = (kind === 'icon' ? initials(title) : title).replace(/[<>&]/g, '');
+  const hue = coverHue(title) + variant * 47;
+  const name = (kind === 'icon' ? initials(title) : title).replace(/[<>&]/g, '');
+  const label = variant === 0 ? name : `${name} ${variant + 1}`;
   const background = kind === 'logo' ? '' : `<rect width='${width}' height='${height}' fill='url(#g)'/>`;
   const svg =
     `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${width} ${height}'>` +
@@ -46,15 +47,53 @@ function demoImage(kind: ArtworkKind, title: string): string {
 export function createDemoBridge({ delayMs = 350 }: { delayMs?: number } = {}): SteamManagerApi {
   const appIdOf = (game: DemoGame): number => 1000 + DEMO_GAMES.indexOf(game);
   const excluded = new Set<string>();
-  /** Images "downloaded" per shortcut ID. */
-  const art = new Map<number, { title: string; kinds: Set<ArtworkKind> }>([
-    [appIdOf(DEMO_GAMES[0] as DemoGame), { title: 'Fortnite', kinds: new Set(ARTWORK_KINDS) }],
-    [appIdOf(DEMO_GAMES[2] as DemoGame), { title: 'Hades', kinds: new Set<ArtworkKind>(['poster', 'hero']) }],
+  /** What is "downloaded" per shortcut ID: the selected image of each kind, whether every option was listed, and the user's picks. */
+  interface DemoArt {
+    title: string;
+    kinds: Set<ArtworkKind>;
+    listed: boolean;
+    picks: Partial<Record<ArtworkKind, number | null>>;
+  }
+  const art = new Map<number, DemoArt>([
+    [appIdOf(DEMO_GAMES[0] as DemoGame), { title: 'Fortnite', kinds: new Set(ARTWORK_KINDS), listed: false, picks: {} }],
+    [appIdOf(DEMO_GAMES[2] as DemoGame), { title: 'Hades', kinds: new Set<ArtworkKind>(['poster', 'hero']), listed: false, picks: {} }],
   ]);
   const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, delayMs));
-  const entryOf = (entry?: { title: string; kinds: Set<ArtworkKind> }): ArtworkEntry => ({ items: entry ? itemsOf(entry) : [], pending: !entry || entry.kinds.size < ARTWORK_KINDS.length });
-  const itemsOf = (entry: { title: string; kinds: Set<ArtworkKind> }): ArtworkItem[] =>
-    ARTWORK_KINDS.filter((kind) => entry.kinds.has(kind)).map((kind) => ({ kind, url: demoImage(kind, entry.title) }));
+  const imageId = (kind: ArtworkKind, index: number): number => (ARTWORK_KINDS.indexOf(kind) + 1) * 1000 + index;
+  /** The options of one kind: every fourth is marked adult, and hidden unless the setting allows it. */
+  const choiceOf = (entry: DemoArt, kind: ArtworkKind): ArtworkChoice => {
+    const all = Array.from({ length: settings.artwork.options }, (_, index) => index).filter((index) => settings.artwork.nsfw || index % 4 !== 3);
+    const [width, height] = IMAGE_SIZE[kind];
+    const options = all.map((index) => {
+      const url = demoImage(kind, entry.title, index);
+      return { id: imageId(kind, index), style: index % 2 === 0 ? 'alternate' : 'material', width, height, nsfw: index % 4 === 3, thumbUrl: url, fullUrl: url };
+    });
+    const pick = entry.picks[kind];
+    const picked = options.find((option) => option.id === pick);
+    return { options, selected: pick === null ? null : (picked ?? options[0])?.id };
+  };
+  const entryOf = (entry?: DemoArt): ArtworkEntry => {
+    const result: ArtworkEntry = { items: [], choices: {}, pending: !entry || entry.kinds.size < ARTWORK_KINDS.length, optionsReady: entry?.listed === true };
+    if (!entry) return result;
+    for (const kind of ARTWORK_KINDS) {
+      const choice = entry.listed ? choiceOf(entry, kind) : undefined;
+      if (choice) result.choices[kind] = choice;
+      if (choice?.selected === null || !entry.kinds.has(kind)) continue;
+      const index = choice?.options.findIndex((option) => option.id === choice.selected) ?? 0;
+      result.items.push({ kind, url: demoImage(kind, entry.title, Math.max(index, 0)) });
+    }
+    return result;
+  };
+  const fill = async ({ appId, title, force }: { appId: number; title: string; force: boolean }, listed: boolean): Promise<ArtworkResult> => {
+    if (apiKey === '') throw new Error('Add a SteamGridDB API key in Settings to download artwork.');
+    await pause();
+    const entry = art.get(appId) ?? { title, kinds: new Set<ArtworkKind>(), listed: false, picks: {} };
+    const outcomes = ARTWORK_KINDS.map((kind) => ({ kind, status: entry.kinds.has(kind) && !force ? ('exists' as const) : ('saved' as const) }));
+    for (const kind of ARTWORK_KINDS) entry.kinds.add(kind);
+    entry.listed ||= listed;
+    art.set(appId, entry);
+    return { outcomes, entry: entryOf(entry) };
+  };
   let settings = structuredClone(DEFAULT_SETTINGS);
   let allow: string[] = [];
   let deny: string[] = ['Some Tool'];
@@ -132,14 +171,14 @@ export function createDemoBridge({ delayMs = 350 }: { delayMs?: number } = {}): 
     about: async () => ({ version: 'demo', platform: 'demo', configFile: '/demo/steam-manager/config.json', artworkCache: '/demo/steam-manager/artwork-cache', steamRoot: '/demo/Steam', secureStorage: true }),
     openConfigFolder: async () => undefined,
     artwork: async (games) => Object.fromEntries(games.map(({ appId }) => [appId, entryOf(art.get(appId))])),
-    downloadArtwork: async ({ appId, title, force }) => {
-      if (apiKey === '') throw new Error('Add a SteamGridDB API key in Settings to download artwork.');
-      await pause();
-      const entry = art.get(appId) ?? { title, kinds: new Set<ArtworkKind>() };
-      const outcomes = ARTWORK_KINDS.map((kind) => ({ kind, status: entry.kinds.has(kind) && !force ? ('exists' as const) : ('saved' as const) }));
-      for (const kind of ARTWORK_KINDS) entry.kinds.add(kind);
+    downloadArtwork: (request) => fill(request, false),
+    loadArtworkOptions: (request) => fill(request, true),
+    chooseArtwork: async ({ appId, title, kind, imageId: picked }) => {
+      const entry = art.get(appId) ?? { title, kinds: new Set<ArtworkKind>(), listed: false, picks: {} };
+      entry.picks[kind] = picked;
+      if (picked !== null) entry.kinds.add(kind);
       art.set(appId, entry);
-      return { outcomes, ...entryOf(entry) };
+      return { entry: entryOf(entry) };
     },
     sync: async (request: SyncRequest): Promise<SyncReport> => {
       const games = listed(request.includeMaybe);

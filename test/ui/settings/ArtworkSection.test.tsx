@@ -141,3 +141,96 @@ describe('ArtworkSection images', () => {
     expect((await screen.findByRole('alert')).textContent).toBe('auto failed');
   });
 });
+
+describe('ArtworkSection options and adult images', () => {
+  const withArt = (over: { options?: number; nsfw?: boolean }) => {
+    const s = withKinds(['poster']);
+    Object.assign(s.artwork, over);
+    return s;
+  };
+  const optionsInput = () => screen.getByLabelText('Options per image type') as HTMLInputElement;
+  const type = (value: string) => fireEvent.change(optionsInput(), { target: { value } });
+
+  it('shows the saved value and its help', async () => {
+    await setup({ settings: withArt({ options: 7 }) });
+    expect(optionsInput().value).toBe('7');
+    expect(optionsInput().min).toBe('1');
+    expect(optionsInput().max).toBe('20');
+    expect(screen.getByText(/How many SteamGridDB images to offer/)).toBeTruthy();
+  });
+
+  it('commits a valid draft on blur', async () => {
+    const { update } = await setup({ settings: withArt({ options: 5 }) });
+    type('12');
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.blur(optionsInput());
+    expect(update).toHaveBeenCalledWith({ artwork: { options: 12 } });
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('commits a valid draft on Enter and ignores other keys', async () => {
+    const { update } = await setup({ settings: withArt({ options: 5 }) });
+    type('3');
+    fireEvent.keyDown(optionsInput(), { key: 'a' });
+    expect(update).not.toHaveBeenCalled();
+    fireEvent.keyDown(optionsInput(), { key: 'Enter' });
+    expect(update).toHaveBeenCalledWith({ artwork: { options: 3 } });
+  });
+
+  it('does not save an unchanged draft', async () => {
+    const { update } = await setup({ settings: withArt({ options: 5 }) });
+    type('5');
+    fireEvent.blur(optionsInput());
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each(['', '0', '21', '3.5', 'abc'])('rejects the draft %j and resets it on blur', async (value) => {
+    const { update } = await setup({ settings: withArt({ options: 5 }) });
+    type(value);
+    fireEvent.keyDown(optionsInput(), { key: 'Enter' });
+    expect((await screen.findByRole('alert')).textContent).toBe('Enter a whole number from 1 to 20.');
+    fireEvent.blur(optionsInput());
+    expect(optionsInput().value).toBe('5');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('clears the error when typing again', async () => {
+    await setup({ settings: withArt({ options: 5 }) });
+    type('99');
+    fireEvent.keyDown(optionsInput(), { key: 'Enter' });
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    type('4');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('follows a change of the saved value from outside', async () => {
+    const update = vi.fn(async (_patch: SettingsPatch) => undefined);
+    installApi();
+    const { rerender } = render(<ArtworkSection settings={withArt({ options: 5 })} update={update} />);
+    type('99');
+    fireEvent.keyDown(optionsInput(), { key: 'Enter' });
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    rerender(<ArtworkSection settings={withArt({ options: 9 })} update={update} />);
+    expect(optionsInput().value).toBe('9');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('shows a failed options save', async () => {
+    await setup({ settings: withArt({ options: 5 }), update: vi.fn(async () => { throw new Error('options failed'); }) });
+    type('6');
+    fireEvent.blur(optionsInput());
+    expect((await screen.findByRole('alert')).textContent).toBe('options failed');
+  });
+
+  it('toggles adult artwork and shows a failure', async () => {
+    const update = vi.fn(async (_patch: SettingsPatch) => undefined).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('nsfw failed'));
+    await setup({ update, settings: withArt({ nsfw: false }) });
+    const sw = screen.getByRole('switch', { name: 'Show adult (NSFW) artwork' }) as HTMLInputElement;
+    expect(sw.checked).toBe(false);
+    expect(screen.getByText(/asked to leave adult images out/)).toBeTruthy();
+    fireEvent.click(sw);
+    expect(update).toHaveBeenCalledWith({ artwork: { nsfw: true } });
+    fireEvent.click(sw);
+    expect((await screen.findByRole('alert')).textContent).toBe('nsfw failed');
+  });
+});

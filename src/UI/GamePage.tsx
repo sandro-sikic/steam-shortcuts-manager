@@ -1,34 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { ArtworkEntry, ArtworkItem, ArtworkKind, ArtworkResult, GameInfo } from '../ipc.js';
+import type { ArtworkEntry, ArtworkKind, ArtworkResult, GameInfo } from '../ipc.js';
 import { api, errorMessage } from './api.js';
+import { ArtworkGallery } from './ArtworkGallery.js';
 import { stateOf } from './gameState.js';
 import { ArrowLeftIcon } from './icons.js';
 import { Switch } from './Switch.js';
-
-/** How each kind of image is shown: its name, SteamGridDB's usual size, and how it fits its frame. */
-const KINDS: Record<ArtworkKind, { label: string; size: string; fit: 'cover' | 'contain' }> = {
-  hero: { label: 'Hero', size: '1920 × 620', fit: 'cover' },
-  poster: { label: 'Poster', size: '600 × 900', fit: 'cover' },
-  wide: { label: 'Wide capsule', size: '920 × 430', fit: 'cover' },
-  logo: { label: 'Logo', size: '800 × 310', fit: 'contain' },
-  icon: { label: 'Icon', size: '256 × 256', fit: 'contain' },
-};
-
-const TILES: ArtworkKind[] = ['poster', 'wide', 'logo', 'icon'];
-
-function Tile({ kind, item }: { kind: ArtworkKind; item?: ArtworkItem }) {
-  const { label, size, fit } = KINDS[kind];
-  return (
-    <figure className={`art-tile ${kind}`}>
-      <div className="art-frame">
-        {item ? <img src={item.url} alt={`${label} image`} style={{ objectFit: fit }} /> : <span className="muted">Not downloaded</span>}
-      </div>
-      <figcaption>
-        {label} <span className="muted">{size}</span>
-      </figcaption>
-    </figure>
-  );
-}
 
 function summary(outcomes: ArtworkResult['outcomes']): { text: string; error?: string } {
   const count = (status: ArtworkResult['outcomes'][number]['status']): number => outcomes.filter((outcome) => outcome.status === status).length;
@@ -41,14 +17,15 @@ function summary(outcomes: ArtworkResult['outcomes']): { text: string; error?: s
 
 export function GamePage({
   game,
-  items,
+  entry,
   onBack,
   onToggle,
   onOpenSettings,
   onArtworkChanged,
 }: {
   game: GameInfo;
-  items: ArtworkItem[];
+  /** What is known about the game's artwork; undefined until it has been read. */
+  entry?: ArtworkEntry;
   onBack: () => void;
   /** Ticks the game on or off for Steam. */
   onToggle: (include: boolean) => void;
@@ -57,29 +34,51 @@ export function GamePage({
 }) {
   const [hasKey, setHasKey] = useState<boolean>();
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState<ArtworkKind>();
   const [result, setResult] = useState<ReturnType<typeof summary>>();
   const [failure, setFailure] = useState<string>();
   const state = stateOf(game);
-  const itemOf = (kind: ArtworkKind): ArtworkItem | undefined => items.find((item) => item.kind === kind);
+  const optionsReady = entry?.optionsReady === true;
+  const fetching = busy || (hasKey === true && !optionsReady && failure === undefined);
 
-  useEffect(() => {
-    api()
-      .apiKeyStatus()
-      .then((status) => setHasKey(status.set))
-      .catch((error: unknown) => setFailure(errorMessage(error)));
-  }, []);
-
-  async function download(force: boolean): Promise<void> {
+  /** Lists the options of every image type and downloads their previews. */
+  async function load(force: boolean): Promise<void> {
     setBusy(true);
     setFailure(undefined);
     try {
-      const downloaded = await api().downloadArtwork({ appId: game.appId, title: game.title, force });
-      setResult(summary(downloaded.outcomes));
-      onArtworkChanged(game.appId, { items: downloaded.items, pending: downloaded.pending });
+      const loaded = await api().loadArtworkOptions({ appId: game.appId, title: game.title, force });
+      setResult(force ? summary(loaded.outcomes) : undefined);
+      onArtworkChanged(game.appId, loaded.entry);
     } catch (error) {
       setFailure(errorMessage(error));
     } finally {
       setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    api()
+      .apiKeyStatus()
+      .then((status) => {
+        setHasKey(status.set);
+        if (status.set && !optionsReady) void load(false);
+      })
+      .catch((error: unknown) => setFailure(errorMessage(error)));
+    // Options are fetched once, when the game is opened.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function pick(kind: ArtworkKind, imageId: number | null): Promise<void> {
+    setPicking(kind);
+    setFailure(undefined);
+    try {
+      const picked = await api().chooseArtwork({ appId: game.appId, title: game.title, kind, imageId });
+      onArtworkChanged(game.appId, picked.entry);
+      setFailure(picked.downloadError);
+    } catch (error) {
+      setFailure(errorMessage(error));
+    } finally {
+      setPicking(undefined);
     }
   }
 
@@ -110,19 +109,14 @@ export function GamePage({
       <section className="panel game-art" aria-label="Artwork">
         <div className="section-head">
           <h2>Artwork</h2>
-          <div className="row">
-            <button type="button" className="button primary" disabled={busy || hasKey === false} onClick={() => void download(false)}>
-              {busy ? 'Downloading…' : 'Download artwork'}
-            </button>
-            {items.length > 0 && (
-              <button type="button" className="button" disabled={busy || hasKey === false} onClick={() => void download(true)}>
-                Download again
-              </button>
-            )}
-          </div>
+          <button type="button" className="button" disabled={busy || hasKey !== true} onClick={() => void load(true)}>
+            {busy ? 'Fetching…' : 'Refresh options'}
+          </button>
         </div>
 
-        <p className="help">Images are kept in this app’s own cache and copied into Steam’s grid folder when the game is synced.</p>
+        <p className="help">
+          Pick the image to use for each type. Your picks are copied into Steam’s grid folder the next time the game is synced.
+        </p>
 
         {hasKey === false && (
           <div className="callout warn" role="status">
@@ -136,19 +130,7 @@ export function GamePage({
         {failure && <p className="status error" role="alert">{failure}</p>}
         {result && <p className="status" role="status">{result.text}{result.error ? ` ${result.error}` : ''}</p>}
 
-        <figure className="art-tile hero">
-          <div className="art-frame">
-            {itemOf('hero') ? <img src={itemOf('hero')?.url} alt="Hero image" /> : <span className="muted">Not downloaded</span>}
-          </div>
-          <figcaption>
-            Hero <span className="muted">{KINDS.hero.size}</span>
-          </figcaption>
-        </figure>
-        <div className="art-grid">
-          {TILES.map((kind) => (
-            <Tile key={kind} kind={kind} item={itemOf(kind)} />
-          ))}
-        </div>
+        <ArtworkGallery entry={entry} loading={fetching} picking={picking} onPick={(kind, imageId) => void pick(kind, imageId)} />
       </section>
     </div>
   );

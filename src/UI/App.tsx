@@ -66,7 +66,7 @@ export function App() {
           setArtProgress({ done: index, total: queue.length });
           try {
             const result = await api().downloadArtwork({ appId: game.appId, title: game.title, force: false });
-            if (!cancelled) setArt((current) => ({ ...current, [game.appId]: { items: result.items, pending: result.pending } }));
+            if (!cancelled) setArt((current) => ({ ...current, [game.appId]: result.entry }));
           } catch {
             // this game is tried again the next time the library loads
           }
@@ -134,7 +134,7 @@ export function App() {
       {openGame && (
         <GamePage
           game={openGame}
-          items={art[openGame.appId]?.items ?? []}
+          entry={art[openGame.appId]}
           onBack={() => setView('library')}
           onToggle={(include) => void toggle([openGame.key], include)}
           onOpenSettings={() => setView('settings')}

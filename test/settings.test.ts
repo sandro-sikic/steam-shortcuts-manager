@@ -12,7 +12,7 @@ describe('defaults', () => {
   it('are safe: preview first, nothing removed, auto-detect Steam, all artwork, system theme', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       steam: { dir: '', user: '', allowRunning: false },
-      artwork: { kinds: ['poster', 'wide', 'hero', 'logo', 'icon'], auto: true },
+      artwork: { kinds: ['poster', 'wide', 'hero', 'logo', 'icon'], auto: true, options: 5, nsfw: false },
       sync: { mode: 'preview', prune: false, includeMaybe: false, artwork: true, autoApply: false },
       launchers: { disabled: [] },
       ui: { theme: 'system', cardSize: 'medium' },
@@ -34,13 +34,14 @@ describe('applySettings', () => {
   it('accepts valid values of every kind', () => {
     const next = applySettings(DEFAULT_SETTINGS, {
       steam: { dir: '  /games/Steam ', user: '12345', allowRunning: true },
-      artwork: { kinds: ['hero', 'poster', 'hero'], auto: false },
+      artwork: { kinds: ['hero', 'poster', 'hero'], auto: false, options: 20, nsfw: true },
       sync: { prune: true, includeMaybe: true, artwork: false, autoApply: true },
       launchers: { disabled: ['riot', 'riot', 'ea'] },
       ui: { cardSize: 'large' },
     });
     expect(next.steam).toEqual({ dir: '/games/Steam', user: '12345', allowRunning: true });
-    expect(next.artwork).toEqual({ kinds: ['hero', 'poster'], auto: false });
+    expect(next.artwork).toEqual({ kinds: ['hero', 'poster'], auto: false, options: 20, nsfw: true });
+    expect(applySettings(DEFAULT_SETTINGS, { artwork: { options: 1 } }).artwork.options).toBe(1);
     expect(next.launchers.disabled).toEqual(['riot', 'ea']);
     expect(next.sync).toMatchObject({ prune: true, includeMaybe: true, artwork: false, autoApply: true });
     expect(applySettings(DEFAULT_SETTINGS, { steam: { user: '' } }).steam.user).toBe('');
@@ -53,6 +54,11 @@ describe('applySettings', () => {
     [{ steam: { user: 7 } }, 'steam.user must be text'],
     [{ steam: { allowRunning: 'yes' } }, 'steam.allowRunning must be true or false'],
     [{ artwork: { auto: 'yes' } }, 'artwork.auto must be true or false'],
+    [{ artwork: { nsfw: 'yes' } }, 'artwork.nsfw must be true or false'],
+    [{ artwork: { options: 0 } }, 'artwork.options must be a whole number from 1 to 20'],
+    [{ artwork: { options: 21 } }, 'artwork.options must be a whole number from 1 to 20'],
+    [{ artwork: { options: 2.5 } }, 'artwork.options must be a whole number from 1 to 20'],
+    [{ artwork: { options: '5' } }, 'artwork.options must be a whole number from 1 to 20'],
     [{ sync: { mode: 'later' } }, 'sync.mode must be one of: preview, apply'],
     [{ sync: { mode: 3 } }, 'sync.mode must be one of'],
     [{ ui: { theme: 'neon' } }, 'ui.theme must be one of: system, light, dark'],

@@ -161,11 +161,38 @@ export interface ArtworkGame {
   title: string;
 }
 
-/** The images a game has: what is in Steam's grid folder, else what the app has cached. */
+/** One image SteamGridDB offers for a game and image type. */
+export interface ArtworkOption {
+  /** SteamGridDB's image id; what a pick is stored as. */
+  id: number;
+  /** SteamGridDB's style label, e.g. `alternate`, `white_logo`, `official`. */
+  style: string;
+  width: number;
+  height: number;
+  nsfw: boolean;
+  /** Cached preview and full image, once downloaded. */
+  thumbUrl?: string;
+  fullUrl?: string;
+}
+
+/** The options for one image type and which is selected. */
+export interface ArtworkChoice {
+  /** Empty when SteamGridDB has no image of this type for the game. */
+  options: ArtworkOption[];
+  /** The selected image id; `null` when the user chose "none"; undefined when there is nothing to select. */
+  selected: number | null | undefined;
+}
+
+/** What a game has: the selected image of each type, and the options behind them. */
 export interface ArtworkEntry {
+  /** The selected image of each type that has one, ready to show (full size, else the preview, else Steam's own file). */
   items: ArtworkItem[];
-  /** Something is neither cached nor known to be missing, so the background download still has work to do. */
+  /** The options per type; a type is missing here until its list has been fetched. */
+  choices: Partial<Record<ArtworkKind, ArtworkChoice>>;
+  /** The background download still has work to do (a list is missing or a selected image is not downloaded). */
   pending: boolean;
+  /** Every list and a preview of every option are cached, so the game page has nothing to fetch. */
+  optionsReady: boolean;
 }
 
 export interface ArtworkRequest {
@@ -177,11 +204,23 @@ export interface ArtworkRequest {
 }
 
 export interface ArtworkResult {
-  /** What happened for each kind. */
-  outcomes: { kind: ArtworkKind; status: 'saved' | 'exists' | 'missing' | 'failed'; error?: string }[];
-  /** All images the game has now. */
-  items: ArtworkItem[];
-  pending: boolean;
+  /** What happened to the selected image of each type. */
+  outcomes: { kind: ArtworkKind; status: 'saved' | 'exists' | 'missing' | 'failed' | 'none'; error?: string }[];
+  entry: ArtworkEntry;
+}
+
+/** The user picks an image for a game and image type, or "none" (`imageId` null). */
+export interface ArtworkPick {
+  appId: number;
+  title: string;
+  kind: ArtworkKind;
+  imageId: number | null;
+}
+
+export interface ArtworkPickResult {
+  entry: ArtworkEntry;
+  /** The pick is saved either way; this says why its full image could not be downloaded now. */
+  downloadError?: string;
 }
 
 export interface SteamManagerApi {
@@ -212,8 +251,12 @@ export interface SteamManagerApi {
   openConfigFolder(): Promise<void>;
   /** The images these games have, by shortcut ID. Reads local files only; never downloads. */
   artwork(games: ArtworkGame[]): Promise<Record<number, ArtworkEntry>>;
-  /** Downloads what a game is missing from SteamGridDB into the app's cache. Needs an API key. */
+  /** Lists a game's options and downloads the selected image of each type into the app's cache. Needs an API key. */
   downloadArtwork(request: ArtworkRequest): Promise<ArtworkResult>;
+  /** Like `downloadArtwork`, and also downloads a preview of every option, for the game page. */
+  loadArtworkOptions(request: ArtworkRequest): Promise<ArtworkResult>;
+  /** Saves the user's pick for a game and type, and downloads that image in full. The pick is kept even if the download fails. */
+  chooseArtwork(pick: ArtworkPick): Promise<ArtworkPickResult>;
 }
 
 export const CHANNELS = {
@@ -237,6 +280,8 @@ export const CHANNELS = {
   openConfigFolder: 'steam-manager:open-config-folder',
   artwork: 'steam-manager:artwork',
   downloadArtwork: 'steam-manager:download-artwork',
+  loadArtworkOptions: 'steam-manager:load-artwork-options',
+  chooseArtwork: 'steam-manager:choose-artwork',
 } as const satisfies Record<keyof SteamManagerApi, string>;
 
 /** The part of Electron's `ipcMain` we use, so registration can be tested without Electron. */

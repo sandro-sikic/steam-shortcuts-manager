@@ -159,7 +159,7 @@ describe('demo bridge', () => {
     const found = await bridge.artwork([{ appId: 1000, title: 'Fortnite' }, { appId: 1002, title: 'Hades' }, { appId: 1003, title: 'Cyberpunk 2077' }]);
     expect(found[1000]?.items.map((i) => i.kind)).toEqual(['poster', 'wide', 'hero', 'logo', 'icon']);
     expect(found[1002]?.items.map((i) => i.kind)).toEqual(['poster', 'hero']);
-    expect(found[1003]).toEqual({ items: [], pending: true });
+    expect(found[1003]).toEqual({ items: [], choices: {}, pending: true, optionsReady: false });
     expect([found[1000]?.pending, found[1002]?.pending]).toEqual([false, true]);
     const svg = decodeURIComponent((found[1000]?.items[0]?.url ?? '').replace('data:image/svg+xml;utf8,', ''));
     expect(svg).toContain('>Fortnite<');
@@ -174,8 +174,9 @@ describe('demo bridge', () => {
     await bridge.setApiKey('demo-key-12345');
     const partial = await bridge.downloadArtwork({ appId: 1002, title: 'Hades', force: false });
     expect(partial.outcomes.map((o) => o.status)).toEqual(['exists', 'saved', 'exists', 'saved', 'saved']);
-    expect(partial.items).toHaveLength(5);
-    expect(partial.pending).toBe(false);
+    expect(partial.entry.items).toHaveLength(5);
+    expect(partial.entry.pending).toBe(false);
+    expect(partial.entry.choices).toEqual({});
     expect((await bridge.downloadArtwork({ appId: 1002, title: 'Hades', force: true })).outcomes.every((o) => o.status === 'saved')).toBe(true);
   });
 
@@ -184,7 +185,57 @@ describe('demo bridge', () => {
     await bridge.setApiKey('demo-key-12345');
     const result = await bridge.downloadArtwork({ appId: 1003, title: 'Cyber <b>& Co', force: false });
     expect(result.outcomes.every((o) => o.status === 'saved')).toBe(true);
-    expect(decodeURIComponent(result.items[0]?.url ?? '')).toContain('>Cyber b Co<');
+    expect(decodeURIComponent(result.entry.items[0]?.url ?? '')).toContain('>Cyber b Co<');
     expect((await bridge.artwork([{ appId: 1003, title: 'x' }]))[1003]?.items).toHaveLength(5);
+  });
+
+  it('lists the options of every type when asked, five by default, the first selected, with a different image for each', async () => {
+    const bridge = createDemoBridge({ delayMs: 0 });
+    await expect(bridge.loadArtworkOptions({ appId: 1002, title: 'Hades', force: false })).rejects.toThrow('Add a SteamGridDB API key in Settings');
+    await bridge.setApiKey('demo-key-12345');
+    const { entry } = await bridge.loadArtworkOptions({ appId: 1002, title: 'Hades', force: false });
+    expect(entry.optionsReady).toBe(true);
+    expect(Object.keys(entry.choices).sort()).toEqual(['hero', 'icon', 'logo', 'poster', 'wide']);
+    const poster = entry.choices.poster;
+    expect(poster?.options).toHaveLength(4); // five were asked for and the fourth is marked adult, so it is left out
+    expect(poster?.options.map((o) => o.id)).toEqual([1000, 1001, 1002, 1004]);
+    expect(poster?.selected).toBe(1000);
+    expect(new Set(poster?.options.map((o) => o.thumbUrl)).size).toBe(4);
+    expect(decodeURIComponent(poster?.options[1]?.thumbUrl ?? '')).toContain('>Hades 2<');
+    expect(poster?.options.map((o) => o.style)).toEqual(['alternate', 'material', 'alternate', 'alternate']);
+  });
+
+  it('shows adult options only when allowed, and as many as the setting says', async () => {
+    const bridge = createDemoBridge({ delayMs: 0 });
+    await bridge.setApiKey('demo-key-12345');
+    await bridge.updateSettings({ artwork: { options: 8, nsfw: true } });
+    const { entry } = await bridge.loadArtworkOptions({ appId: 1002, title: 'Hades', force: false });
+    expect(entry.choices.hero?.options).toHaveLength(8);
+    expect(entry.choices.hero?.options.filter((o) => o.nsfw)).toHaveLength(2);
+    await bridge.updateSettings({ artwork: { nsfw: false } });
+    expect((await bridge.artwork([{ appId: 1002, title: 'Hades' }]))[1002]?.choices.hero?.options).toHaveLength(6);
+  });
+
+  it('remembers picks: another image, none, and a pick that is no longer offered falls back to the first', async () => {
+    const bridge = createDemoBridge({ delayMs: 0 });
+    await bridge.setApiKey('demo-key-12345');
+    await bridge.loadArtworkOptions({ appId: 1002, title: 'Hades', force: false });
+    const picked = await bridge.chooseArtwork({ appId: 1002, title: 'Hades', kind: 'poster', imageId: 1002 });
+    expect(picked.entry.choices.poster?.selected).toBe(1002);
+    expect(decodeURIComponent(picked.entry.items.find((i) => i.kind === 'poster')?.url ?? '')).toContain('>Hades 3<');
+    const none = await bridge.chooseArtwork({ appId: 1002, title: 'Hades', kind: 'hero', imageId: null });
+    expect(none.entry.choices.hero?.selected).toBeNull();
+    expect(none.entry.items.some((i) => i.kind === 'hero')).toBe(false);
+    const stale = await bridge.chooseArtwork({ appId: 1002, title: 'Hades', kind: 'logo', imageId: 9999 });
+    expect(stale.entry.choices.logo?.selected).toBe(4000);
+    expect((await bridge.artwork([{ appId: 1002, title: 'Hades' }]))[1002]?.choices.poster?.selected).toBe(1002);
+  });
+
+  it('can take a pick for a game it knows nothing about yet', async () => {
+    const bridge = createDemoBridge({ delayMs: 0 });
+    const result = await bridge.chooseArtwork({ appId: 1005, title: 'Stardew Valley', kind: 'icon', imageId: 5001 });
+    expect(result.entry.optionsReady).toBe(false);
+    expect(result.entry.items.map((i) => i.kind)).toEqual(['icon']);
+    expect(result.entry.choices).toEqual({});
   });
 });

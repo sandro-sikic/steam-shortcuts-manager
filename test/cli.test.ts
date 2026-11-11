@@ -9,21 +9,11 @@ import { buildShortcut, computeAppId, MANAGED_TAG } from '../src/steam/shortcuts
 import { loadShortcuts, saveShortcuts } from '../src/steam/store.js';
 import type { Integration } from '../src/integrations/types.js';
 import type { Game } from '../src/types.js';
-import { cleanupTempDirs, desktopEnv, fakeFetch, makeSteamRoot, makeTempDir } from './helpers.js';
+import { cleanupTempDirs, desktopEnv, fakeFetch, makeSteamRoot, makeTempDir, sgdbRoutes } from './helpers.js';
 
 afterEach(cleanupTempDirs);
 
-const API = 'https://www.steamgriddb.com/api/v2';
-const artRoutes = {
-  [`${API}/search/autocomplete/Fortnite`]: { json: { success: true, data: [{ id: 1, name: 'Fortnite' }] } },
-  [`${API}/grids/game/1?dimensions=600x900&types=static`]: { json: { success: true, data: [{ url: 'https://c/p.png' }] } },
-  [`${API}/grids/game/1?dimensions=920x430,460x215&types=static`]: { json: { success: true, data: [] } },
-  [`${API}/heroes/game/1?types=static`]: { json: { success: true, data: [{ url: 'https://c/h.png' }] } },
-  [`${API}/logos/game/1?types=static`]: { json: { success: true, data: [] } },
-  [`${API}/icons/game/1?types=static`]: { json: { success: true, data: [] } },
-  'https://c/p.png': { body: Buffer.from('P') },
-  'https://c/h.png': { body: Buffer.from('H') },
-};
+const artRoutes = sgdbRoutes({ title: 'Fortnite', counts: { wide: 0, logo: 0, icon: 0 } });
 
 const fortnite: Game = { store: 'Epic Games', id: 'fn', title: 'Fortnite', installed: true, launch: { kind: 'exe', exe: '/games/fortnite' } };
 

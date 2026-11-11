@@ -20,6 +20,10 @@ export interface Settings {
     kinds: ArtworkKind[];
     /** Download artwork for every game in the library in the background, into the app's own cache. */
     auto: boolean;
+    /** How many SteamGridDB images to offer per image type (1 to 20). */
+    options: number;
+    /** Also offer adult (NSFW) images. Passed to SteamGridDB when searching. */
+    nsfw: boolean;
   };
   /** Defaults for the sync panel. */
   sync: {
@@ -42,7 +46,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   steam: { dir: '', user: '', allowRunning: false },
-  artwork: { kinds: [...ARTWORK_KINDS], auto: true },
+  artwork: { kinds: [...ARTWORK_KINDS], auto: true, options: 5, nsfw: false },
   sync: { mode: 'preview', prune: false, includeMaybe: false, artwork: true, autoApply: false },
   launchers: { disabled: [] },
   ui: { theme: 'system', cardSize: 'medium' },
@@ -61,6 +65,14 @@ const flag: Field = (value, name) => {
   if (typeof value !== 'boolean') throw new Error(`${name} must be true or false`);
   return value;
 };
+const integer =
+  (min: number, max: number): Field =>
+  (value, name) => {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) {
+      throw new Error(`${name} must be a whole number from ${min} to ${max}`);
+    }
+    return value;
+  };
 const choice =
   (options: readonly string[]): Field =>
   (value, name) => {
@@ -87,7 +99,7 @@ const FIELDS: { [S in keyof Settings]: { [K in keyof Settings[S]]: Field } } = {
     },
     allowRunning: flag,
   },
-  artwork: { kinds: list(ARTWORK_KINDS), auto: flag },
+  artwork: { kinds: list(ARTWORK_KINDS), auto: flag, options: integer(1, 20), nsfw: flag },
   sync: { mode: choice(['preview', 'apply']), prune: flag, includeMaybe: flag, artwork: flag, autoApply: flag },
   launchers: { disabled: list() },
   ui: { theme: choice(['system', 'light', 'dark']), cardSize: choice(['small', 'medium', 'large']) },

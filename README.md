@@ -19,7 +19,7 @@ npm run start    # production build, then launch Electron
 - `electron/main.ts` creates the window (context isolation and sandbox on, no node integration, navigation locked)
   and `electron/preload.cts` exposes the bridge. The CommonJS preload repeats the channel names from `src/ipc.ts`;
   a test keeps them in sync.
-- `src/ipc.ts` is the typed contract (status, shortcuts, integrations, apps, games, setExcluded, sync, settings, updateSettings, resetSettings, lists, setLists, apiKeyStatus, setApiKey, testApiKey, steamAccounts, about, openConfigFolder, artwork, downloadArtwork) and `src/api.ts` implements it on
+- `src/ipc.ts` is the typed contract (status, shortcuts, integrations, apps, games, setExcluded, sync, settings, updateSettings, resetSettings, lists, setLists, apiKeyStatus, setApiKey, testApiKey, steamAccounts, about, openConfigFolder, artwork, downloadArtwork, loadArtworkOptions, chooseArtwork) and `src/api.ts` implements it on
   top of the same code the CLI uses, returning data instead of printing. To add a feature: add the method to
   `SteamManagerApi` and `CHANNELS`, implement it in `api.ts`, repeat the channel in the preload, and call it from the UI.
 - The UI defaults to a dry run. Syncing writes only while Steam is closed.
@@ -93,13 +93,23 @@ Tap a game card in the library to open its page: title, a back button, the store
 "Not downloaded" placeholder for any that are missing. The checkbox in a card's corner still ticks the game on or off
 without opening it.
 
+**Picking images.** SteamGridDB has several images of each type for most games, so the gallery groups them by type
+(hero, poster, wide capsule, logo, icon) and shows the options of each type in a row. The first option is selected by
+default; click another to select it (it gets a border), or choose **None** to leave that type out. The hero is large, so it
+has a big preview with a strip of small clickable thumbnails underneath. Arrow keys move the selection inside a row.
+Opening a game fetches all its options (their previews are small thumbnails); **Refresh options** asks again.
+Your picks are remembered by SteamGridDB image id in `config.json` (`artworkChoices`), so they survive clearing the cache,
+and they are copied into Steam's grid folder the next time the game is synced. A game that is already in Steam is not
+changed until then. Picking again replaces the image we copied earlier; an image you put there yourself is never replaced.
+
 **The app keeps its own copy of the artwork.** Once the library is ready, and a SteamGridDB key is set, the app downloads
-the images of every game that has none cached yet, one game at a time, with a progress line in the library; posters appear
+the selected image of every game that has none cached yet, one game at a time, with a progress line in the library; posters appear
 on the cards as they arrive. Quit at any point and it resumes next time, fetching only what is missing.
 
 - **Where:** `<config folder>/artwork-cache/<title>-<hash>/` (shown in Settings > About), one folder per game keyed by its
-  title, so the same game from two launchers shares its art. Each folder holds `poster`, `wide`, `hero`, `logo` and `icon`
-  images plus a small `meta.json`. Expect roughly 5 MB per game.
+  title, so the same game from two launchers shares its art. Each folder holds the full image of every selected option
+  (`full-<type>-<id>`), small previews of the options the game page has shown (`thumb-<type>-<id>`), and a `meta.json` with the
+  lists SteamGridDB returned. Only the selected images are downloaded in full, so the cost is about one image per type, plus previews.
 - **What is not asked twice:** an image SteamGridDB does not have is remembered (as "missing") for a week before it is asked for
   again, so an obscure game does not cost a request on every launch. Failed downloads are not remembered and are retried.
 - **Matching:** a game is matched on SteamGridDB by exact title (ignoring case, punctuation, symbols and Roman numerals II to IX).
@@ -108,17 +118,18 @@ on the cards as they arrive. Quit at any point and it resumes next time, fetchin
   game needs no second download. An image already in Steam's folder is kept; the library and game page prefer it over the cache.
 - **Every image is tagged as ours.** The moment an image is downloaded, "Steam Manager (steam-manager:artwork)" is written into the
   file: a standard text chunk in PNGs, a standard comment in JPEGs (after the JFIF/Exif headers), and a short footer after
-  the image data for ICO and WebP, which have no safe metadata place and whose decoders ignore trailing bytes. Pixels and other
-  metadata are unchanged. Images cached before tagging existed are tagged when they are copied into Steam.
+  the image data for ICO and WebP, which have no safe metadata place and whose decoders ignore trailing bytes. The tag also
+  records the SteamGridDB image id (`id=<n>`), which is how a changed pick is told apart from the one already in Steam.
+  Pixels and other metadata are unchanged. Images cached before tagging existed are tagged when they are copied into Steam.
 - **Removing a game takes only our images with it.** When a shortcut is removed (unchecked, pruned, or replaced), sync deletes the
   files in Steam's grid folder that are named for that shortcut's ID **and** carry our tag. Anything else with that name, such as
   an image you made, stays, and the log says how many were kept. Images copied before tagging existed have no tag and are left in place.
-- **Controls:** Settings > Artwork can turn the automatic download off, and chooses which images are copied into Steam.
-  The game page's **Download artwork** and **Download again** fetch one game on demand.
+- **Controls:** Settings > Artwork can turn the automatic download off, chooses which types are copied into Steam, sets how
+  many options to offer per type (5 by default, from 1 to 20) and has the **Show adult (NSFW) artwork** switch. It is off by
+  default; turned on, it asks SteamGridDB for adult images too (`nsfw=any`), and they are marked "Adult" in the gallery.
 - **The page never touches files:** the desktop app serves images through a `steam-manager-art://` scheme
   (`grid/<file>` for Steam's folder, `cache/<game>/<file>` for the cache) that only accepts image names, no paths, and the page's
   security policy allows images from it and nothing else.
-- Only the single top-rated image per kind is downloaded. Browsing other SteamGridDB alternatives is not built yet.
 
 ## Settings
 
@@ -126,7 +137,7 @@ The gear in the header opens the settings page. Changes save as you make them.
 
 | Section | What it controls |
 |---|---|
-| Artwork | the SteamGridDB API key (with a Test button), automatic artwork download, which images are copied into Steam, and whether sync copies artwork |
+| Artwork | the SteamGridDB API key (with a Test button), automatic artwork download, which images are copied into Steam, how many options to offer per type (1 to 20), adult artwork on or off, and whether sync copies artwork |
 | Steam | the Steam folder (empty = auto-detect), the account, and whether changes may be written while Steam is running |
 | Sync | the sync panel's starting choices (Preview or Apply, remove games that are gone, weak guesses) and **auto-apply**, which applies to Steam as soon as you tick or untick a game |
 | Launchers | turn individual launchers on or off |
@@ -169,7 +180,7 @@ you asked for that game explicitly.
 
 - `src/vdf` binary (`shortcuts.vdf`) and text (`loginusers.vdf`) VDF parsers
 - `src/steam` Steam location, running check, shortcut model, store, sync planner
-- `src/artwork` SteamGridDB client and grid-folder installer
+- `src/artwork` SteamGridDB client, the artwork cache (options, picks, copy into the grid folder) and image tagging
 - `src/integrations` one file per launcher, plus the registry (`index.ts`) and shared helpers
 - `src/launcher` wrapper scripts for URI launches
 - `src/UI` React UI, `electron/` main process and preload, `src/api.ts` + `src/ipc.ts` the bridge between them

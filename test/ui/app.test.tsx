@@ -3,9 +3,10 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/UI/App.js';
 import { applySettings, DEFAULT_SETTINGS } from '../../src/settingsModel.js';
-import { emptyReport, gamesReport, installApi, okStatus, settings } from './mockApi.js';
+import { artworkEntry, emptyReport, gamesReport, installApi, okStatus, settings } from './mockApi.js';
 
-const poster = (appId: number) => ({ [appId]: { items: [{ kind: 'poster' as const, url: `steam-manager-art://grid/${appId}p.png?v=1` }], pending: false } });
+const entryOf = (items: { kind: 'poster' | 'hero'; url: string }[], pending = false, optionsReady = false) => ({ items, choices: {}, pending, optionsReady });
+const poster = (appId: number) => ({ [appId]: entryOf([{ kind: 'poster', url: `steam-manager-art://grid/${appId}p.png?v=1` }]) });
 
 afterEach(cleanup);
 
@@ -287,14 +288,14 @@ describe('App game page', () => {
   });
 
   it('opens a game when its card is tapped, and goes back to the library', async () => {
-    installApi({ artwork: vi.fn(async () => ({ 1: { items: [{ kind: 'hero' as const, url: 'steam-manager-art://grid/1_hero.png' }], pending: false } })) });
+    installApi({ artwork: vi.fn(async () => ({ 1: { ...artworkEntry(), items: [{ kind: 'hero' as const, url: 'steam-manager-art://grid/1_hero.png' }] } })) });
     render(<App />);
     await screen.findByText('Fortnite');
     fireEvent.click(screen.getByRole('button', { name: 'Open Fortnite' }));
 
     expect(screen.getByRole('heading', { name: 'Fortnite', level: 2 })).toBeTruthy();
     expect(screen.getByRole('region', { name: 'Artwork' })).toBeTruthy();
-    expect(screen.getByRole('img', { name: 'Hero image' }).getAttribute('src')).toBe('steam-manager-art://grid/1_hero.png');
+    expect(within(screen.getByRole('radiogroup', { name: 'Hero image' })).getAllByRole('radio').length).toBeGreaterThan(1);
     expect(screen.queryByRole('region', { name: 'Library' })).toBeNull();
     expect(screen.queryByText('Preview changes')).toBeNull();
 
@@ -315,15 +316,13 @@ describe('App game page', () => {
   it('shows downloaded images straight away, on the page and in the library', async () => {
     const mock = installApi({
       apiKeyStatus: vi.fn(async () => ({ set: true, source: 'saved' as const, secureStorage: true })),
-      downloadArtwork: vi.fn(async () => ({ outcomes: [], items: [{ kind: 'poster' as const, url: 'steam-manager-art://grid/4p.png?v=2' }], pending: false })),
+      loadArtworkOptions: vi.fn(async () => ({ outcomes: [], entry: { ...artworkEntry(), items: [{ kind: 'poster' as const, url: 'steam-manager-art://grid/4p.png?v=2' }] } })),
     });
     render(<App />);
     await screen.findByText('Rocket League');
     fireEvent.click(screen.getByRole('button', { name: 'Open Rocket League' }));
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Download artwork' }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole('button', { name: 'Download artwork' }));
-    await waitFor(() => expect(screen.getByRole('img', { name: 'Poster image' }).getAttribute('src')).toBe('steam-manager-art://grid/4p.png?v=2'));
-    expect(mock.downloadArtwork).toHaveBeenCalledWith({ appId: 4, title: 'Rocket League', force: false });
+    await waitFor(() => expect(mock.loadArtworkOptions).toHaveBeenCalledWith({ appId: 4, title: 'Rocket League', force: false }));
+    await waitFor(() => expect(within(screen.getByRole('radiogroup', { name: 'Poster image' })).getAllByRole('radio').length).toBeGreaterThan(1));
 
     fireEvent.click(screen.getByRole('button', { name: 'Library' }));
     expect((screen.getByText('Rocket League').closest('li') as HTMLElement).querySelector('img')?.getAttribute('src')).toBe('steam-manager-art://grid/4p.png?v=2');
@@ -364,10 +363,10 @@ describe('App game page', () => {
 });
 
 describe('App background artwork download', () => {
-  const pending = (appId: number, isPending = true) => ({ [appId]: { items: [], pending: isPending } });
+  const pending = (appId: number, isPending = true) => ({ [appId]: entryOf([], isPending) });
   const lookups = { ...pending(1, false), ...pending(4), ...pending(5), ...pending(6) };
   const withKey = { apiKeyStatus: vi.fn(async () => ({ set: true, source: 'saved' as const, secureStorage: true })) };
-  const posterResult = (appId: number) => ({ outcomes: [], items: [{ kind: 'poster' as const, url: `steam-manager-art://cache/g/poster.png?v=${appId}` }], pending: false });
+  const posterResult = (appId: number) => ({ outcomes: [], entry: entryOf([{ kind: 'poster', url: `steam-manager-art://cache/g/poster.png?v=${appId}` }]) });
   const posterOf = (title: string) => (screen.getByText(title).closest('li') as HTMLElement).querySelector('img');
 
   it('downloads the artwork of every game that is missing some, one at a time, and shows the posters as they arrive', async () => {
@@ -465,18 +464,17 @@ describe('App background artwork download', () => {
     await waitFor(() => expect(posterOf('Rocket League')).not.toBeNull());
   });
 
-  it('can also be started from the game page, which updates what the library shows', async () => {
+  it('fetches the options when a game page opens, which updates what the library shows', async () => {
     installApi({
       ...withKey,
       settings: vi.fn(async () => applySettings(settings, { artwork: { auto: false } })),
-      downloadArtwork: vi.fn(async () => posterResult(4)),
+      loadArtworkOptions: vi.fn(async () => posterResult(4)),
     });
     render(<App />);
     await screen.findByText('Rocket League');
     fireEvent.click(screen.getByRole('button', { name: 'Open Rocket League' }));
-    await waitFor(() => expect((screen.getByRole('button', { name: 'Download artwork' }) as HTMLButtonElement).disabled).toBe(false));
-    fireEvent.click(screen.getByRole('button', { name: 'Download artwork' }));
-    await waitFor(() => expect(screen.getByRole('img', { name: 'Poster image' })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Refresh options' })).toBeTruthy());
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Refresh options' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Library' }));
     expect(posterOf('Rocket League')?.getAttribute('src')).toContain('v=4');
   });

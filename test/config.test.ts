@@ -25,7 +25,7 @@ describe('loadConfig', () => {
   }
 
   it('means no overrides when there is no file', async () => {
-    expect(await loadConfig(await makeTempDir())).toEqual({ allow: [], deny: [], exclude: [] });
+    expect(await loadConfig(await makeTempDir())).toEqual({ allow: [], deny: [], exclude: [], artworkChoices: {} });
   });
 
   it('reads allow and deny lists, each optional', async () => {
@@ -33,9 +33,15 @@ describe('loadConfig', () => {
       allow: ['Hades'],
       deny: ['Solitaire', 'x'],
       exclude: ['Epic Games:fn'],
+      artworkChoices: {},
     });
-    expect(await loadConfig(await withConfig('{"allow":["A"]}'))).toEqual({ allow: ['A'], deny: [], exclude: [] });
-    expect(await loadConfig(await withConfig('{}'))).toEqual({ allow: [], deny: [], exclude: [] });
+    expect(await loadConfig(await withConfig('{"allow":["A"]}'))).toEqual({ allow: ['A'], deny: [], exclude: [], artworkChoices: {} });
+    expect(await loadConfig(await withConfig('{}'))).toEqual({ allow: [], deny: [], exclude: [], artworkChoices: {} });
+  });
+
+  it('reads the image the user picked for each type of a game, where null means none', async () => {
+    const config = await loadConfig(await withConfig('{"artworkChoices":{"hades-1":{"poster":5,"hero":null},"x-2":{}}}'));
+    expect(config.artworkChoices).toEqual({ 'hades-1': { poster: 5, hero: null }, 'x-2': {} });
   });
 
   it('reports invalid files instead of silently ignoring them', async () => {
@@ -46,22 +52,25 @@ describe('loadConfig', () => {
     await expect(loadConfig(await withConfig('{"allow":"Hades"}'))).rejects.toThrow('"allow" must be a list of strings');
     await expect(loadConfig(await withConfig('{"deny":[1]}'))).rejects.toThrow('"deny" must be a list of strings');
     await expect(loadConfig(await withConfig('{"exclude":{}}'))).rejects.toThrow('"exclude" must be a list of strings');
+    for (const bad of ['[]', '5', '{"g":5}', '{"g":[]}', '{"g":{"banner":1}}', '{"g":{"poster":"1"}}', '{"g":{"poster":1.5}}', '{"g":{"poster":-1}}']) {
+      await expect(loadConfig(await withConfig(`{"artworkChoices":${bad}}`))).rejects.toThrow('"artworkChoices" must map each game to image ids per type');
+    }
   });
 });
 
 describe('updateConfig', () => {
   it('creates the config file and folder, returning the new config', async () => {
     const dir = path.join(await makeTempDir(), 'nested', 'steam-manager');
-    expect(await updateConfig(dir, { exclude: ['a:1'] })).toEqual({ allow: [], deny: [], exclude: ['a:1'] });
-    expect(JSON.parse(await readFile(path.join(dir, 'config.json'), 'utf8'))).toEqual({ allow: [], deny: [], exclude: ['a:1'] });
-    expect(await loadConfig(dir)).toEqual({ allow: [], deny: [], exclude: ['a:1'] });
+    expect(await updateConfig(dir, { exclude: ['a:1'] })).toEqual({ allow: [], deny: [], exclude: ['a:1'], artworkChoices: {} });
+    expect(JSON.parse(await readFile(path.join(dir, 'config.json'), 'utf8'))).toEqual({ allow: [], deny: [], exclude: ['a:1'], artworkChoices: {} });
+    expect(await loadConfig(dir)).toEqual({ allow: [], deny: [], exclude: ['a:1'], artworkChoices: {} });
   });
 
   it('changes only what it is given and keeps other settings, including unknown ones', async () => {
     const dir = await makeTempDir();
     await writeFile(path.join(dir, 'config.json'), '{"allow":["Hades"],"deny":["x"],"theme":"dark"}');
     await updateConfig(dir, { exclude: ['b:2'] });
-    expect(JSON.parse(await readFile(path.join(dir, 'config.json'), 'utf8'))).toEqual({ allow: ['Hades'], deny: ['x'], exclude: ['b:2'], theme: 'dark' });
+    expect(JSON.parse(await readFile(path.join(dir, 'config.json'), 'utf8'))).toEqual({ allow: ['Hades'], deny: ['x'], exclude: ['b:2'], artworkChoices: {}, theme: 'dark' });
     await updateConfig(dir, { allow: [] });
     expect((await loadConfig(dir)).exclude).toEqual(['b:2']);
   });

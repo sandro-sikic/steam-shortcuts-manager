@@ -78,6 +78,33 @@ export function ArtworkSection({ settings, update }: SectionProps) {
     update({ artwork: { auto: next } }).catch((error: unknown) => setSaveError(errorMessage(error)));
   };
 
+  const toggleNsfw = (next: boolean) => {
+    setSaveError(undefined);
+    update({ artwork: { nsfw: next } }).catch((error: unknown) => setSaveError(errorMessage(error)));
+  };
+
+  const saved = settings.artwork.options;
+  const [draft, setDraft] = useState(String(saved));
+  const [draftInvalid, setDraftInvalid] = useState(false);
+  useEffect(() => {
+    setDraft(String(saved));
+    setDraftInvalid(false);
+  }, [saved]);
+
+  /** Saves the draft when it is a whole number from 1 to 20 that differs from the saved value. */
+  const commitOptions = (resetIfInvalid: boolean) => {
+    const n = Number(draft);
+    if (!Number.isInteger(n) || n < 1 || n > 20) {
+      setDraftInvalid(true);
+      if (resetIfInvalid) setDraft(String(saved));
+      return;
+    }
+    setDraftInvalid(false);
+    if (n === saved) return;
+    setSaveError(undefined);
+    update({ artwork: { options: n } }).catch((error: unknown) => setSaveError(errorMessage(error)));
+  };
+
   const toggleSync = (next: boolean) => {
     setSaveError(undefined);
     update({ sync: { artwork: next } }).catch((error: unknown) => setSaveError(errorMessage(error)));
@@ -149,6 +176,36 @@ export function ArtworkSection({ settings, update }: SectionProps) {
         Download artwork for my games automatically
       </Switch>
       <p className="help">When the library is ready, the app downloads the images of every game it finds into its own cache.</p>
+      <div className="field">
+        <label htmlFor="settings-artwork-options">Options per image type</label>
+        <input
+          id="settings-artwork-options"
+          className="input"
+          type="number"
+          min="1"
+          max="20"
+          step="1"
+          value={draft}
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setDraftInvalid(false);
+          }}
+          onBlur={() => commitOptions(true)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') commitOptions(false);
+          }}
+        />
+        <p className="help">How many SteamGridDB images to offer for each image type on a game's page (1 to 20).</p>
+        {draftInvalid && (
+          <p className="status error" role="alert">
+            Enter a whole number from 1 to 20.
+          </p>
+        )}
+      </div>
+      <Switch checked={settings.artwork.nsfw} onChange={toggleNsfw}>
+        Show adult (NSFW) artwork
+      </Switch>
+      <p className="help">When off, SteamGridDB is asked to leave adult images out. Turning it on also offers adult images.</p>
       <Switch checked={settings.sync.artwork} onChange={toggleSync}>
         Copy artwork into Steam when syncing
       </Switch>

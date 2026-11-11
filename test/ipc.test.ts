@@ -24,6 +24,8 @@ function fakeApi(): { [K in keyof SteamManagerApi]: ReturnType<typeof vi.fn> } {
     openConfigFolder: vi.fn(async () => 'openConfigFolder'),
     artwork: vi.fn(async () => 'artwork'),
     downloadArtwork: vi.fn(async () => 'downloadArtwork'),
+    loadArtworkOptions: vi.fn(async () => 'loadArtworkOptions'),
+    chooseArtwork: vi.fn(async () => 'chooseArtwork'),
   };
 }
 

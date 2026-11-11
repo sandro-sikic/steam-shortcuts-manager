@@ -140,11 +140,11 @@ describe('Library', () => {
   });
 
   describe('posters', () => {
-    const poster = (url: string) => ({ items: [{ kind: 'poster' as const, url }], pending: false });
+    const poster = (url: string) => ({ items: [{ kind: 'poster' as const, url }], choices: {}, pending: false, optionsReady: false });
     const imageOf = (name: string) => (screen.getByText(name).closest('li') as HTMLElement).querySelector('img');
 
     it('shows the downloaded poster of a game, and the generated cover for games without one', () => {
-      renderLibrary({ art: { 1: { items: [...poster('steam-manager-art://grid/1p.png?v=1').items, { kind: 'hero', url: 'x://hero' }], pending: false }, 5: { items: [{ kind: 'hero', url: 'x://only-hero' }], pending: false } } });
+      renderLibrary({ art: { 1: { items: [...poster('steam-manager-art://grid/1p.png?v=1').items, { kind: 'hero', url: 'x://hero' }], choices: {}, pending: false, optionsReady: false }, 5: { items: [{ kind: 'hero', url: 'x://only-hero' }], choices: {}, pending: false, optionsReady: false } } });
       expect(imageOf('Fortnite')?.getAttribute('src')).toBe('steam-manager-art://grid/1p.png?v=1');
       expect(imageOf('Fortnite')?.getAttribute('loading')).toBe('lazy');
       expect(imageOf('Rocket League')).toBeNull();

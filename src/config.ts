@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { ARTWORK_KINDS, type ArtworkKind } from './artwork/kinds.js';
 import { readTextIfExists } from './integrations/shared/fs.js';
 
 /** `<config home>/steam-manager`: where wrapper scripts and the config file live. */
@@ -13,6 +14,9 @@ export function configDir(platform: NodeJS.Platform, home: string, env: NodeJS.P
   return path.posix.join(env['XDG_CONFIG_HOME'] || path.posix.join(home, '.config'), 'steam-manager');
 }
 
+/** The images the user picked for a game: a SteamGridDB image id per type, or `null` for "none". Keyed by the game's cache key. */
+export type ArtworkChoices = Record<string, Partial<Record<ArtworkKind, number | null>>>;
+
 /** User choices, stored in `config.json`. */
 export interface Config {
   /** Installed apps (by title or id) that are always games. */
@@ -21,6 +25,8 @@ export interface Config {
   deny: string[];
   /** Keys of games (`store:id`) the user switched off: they are not added to Steam, and ours are removed. */
   exclude: string[];
+  /** The artwork the user picked per game and image type; without a pick the first result is used. */
+  artworkChoices: ArtworkChoices;
 }
 
 function stringList(value: unknown, name: string, file: string): string[] {
@@ -29,6 +35,24 @@ function stringList(value: unknown, name: string, file: string): string[] {
     throw new Error(`Invalid config file ${file}: "${name}" must be a list of strings`);
   }
   return value as string[];
+}
+
+function readArtworkChoices(value: unknown, file: string): ArtworkChoices {
+  if (value === undefined) return {};
+  const invalid = () => new Error(`Invalid config file ${file}: "artworkChoices" must map each game to image ids per type`);
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw invalid();
+  const choices: ArtworkChoices = {};
+  for (const [game, picks] of Object.entries(value)) {
+    if (typeof picks !== 'object' || picks === null || Array.isArray(picks)) throw invalid();
+    const entry: ArtworkChoices[string] = {};
+    for (const [kind, id] of Object.entries(picks)) {
+      const validId = id === null || (typeof id === 'number' && Number.isInteger(id) && id >= 0);
+      if (!ARTWORK_KINDS.includes(kind as ArtworkKind) || !validId) throw invalid();
+      entry[kind as ArtworkKind] = id as number | null;
+    }
+    choices[game] = entry;
+  }
+  return choices;
 }
 
 export function configFile(dir: string): string {
@@ -66,6 +90,7 @@ export async function loadConfig(dir: string): Promise<Config> {
     allow: stringList(record['allow'], 'allow', file),
     deny: stringList(record['deny'], 'deny', file),
     exclude: stringList(record['exclude'], 'exclude', file),
+    artworkChoices: readArtworkChoices(record['artworkChoices'], file),
   };
 }
 

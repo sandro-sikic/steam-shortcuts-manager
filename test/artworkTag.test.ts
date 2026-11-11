@@ -3,7 +3,7 @@ import path from 'node:path';
 import { crc32, deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it } from 'vitest';
 import { removeTaggedArtwork } from '../src/artwork/grid.js';
-import { isTagged, TAG_TEXT, tagImage } from '../src/artwork/tag.js';
+import { isTagged, readTag, tagImage, tagText, untagImage } from '../src/artwork/tag.js';
 import { cleanupTempDirs, makeTempDir } from './helpers.js';
 
 afterEach(cleanupTempDirs);
@@ -44,6 +44,7 @@ const jpegSegment = (marker: number, payload: Buffer) => {
 };
 const SOI = Buffer.from([0xff, 0xd8]);
 const SOS_AND_DATA = Buffer.concat([jpegSegment(0xda, Buffer.from([1, 2, 3])), Buffer.from([0x11, 0x22, 0x33]), Buffer.from([0xff, 0xd9])]);
+const TAG_TEXT = tagText();
 const FOOTER_TEXT = Buffer.from(`\0${TAG_TEXT}`, 'latin1');
 
 describe('PNG', () => {
@@ -206,5 +207,37 @@ describe('removeTaggedArtwork', () => {
     const dir = await grid({ '7p.png': png(IDAT), '7p.jpg': Buffer.concat([SOI, SOS_AND_DATA]) });
     expect(await removeTaggedArtwork(dir, 7)).toEqual({ removed: 0, kept: 2 });
     await expect(stat(path.join(dir, '7p.png'))).resolves.toBeTruthy();
+  });
+});
+
+describe('the SteamGridDB image id in the tag', () => {
+  const jpeg = Buffer.concat([SOI, jpegSegment(0xe0, Buffer.from('JFIF\0')), SOS_AND_DATA]);
+  const ico = Buffer.from('plain icon bytes');
+
+  it('writes the id into the visible text', () => {
+    expect(tagText()).toBe('Steam Manager (steam-manager:artwork)');
+    expect(tagText(42)).toBe('Steam Manager (steam-manager:artwork) id=42');
+  });
+
+  it.each([['PNG', png(IDAT)], ['JPEG', jpeg], ['footer formats', ico]])('reads the id back from a %s, and nothing from an untagged image', (_name, image) => {
+    expect(readTag(image)).toBeUndefined();
+    expect(readTag(tagImage(image, 1234))).toEqual({ id: 1234 });
+    expect(readTag(tagImage(image))).toEqual({});
+    expect(isTagged(tagImage(image, 1234))).toBe(true);
+  });
+
+  it.each([['PNG', png(IDAT)], ['JPEG', jpeg], ['footer formats', ico]])('tags a %s with the same id once, and replaces the tag for another id or an old tag without one', (_name, image) => {
+    const first = tagImage(image, 5);
+    expect(tagImage(first, 5)).toBe(first);
+    const other = tagImage(first, 6);
+    expect(readTag(other)).toEqual({ id: 6 });
+    expect(untagImage(other).equals(image)).toBe(true);
+    expect(readTag(tagImage(tagImage(image), 7))).toEqual({ id: 7 });
+    expect(readTag(tagImage(first))).toEqual({});
+  });
+
+  it.each([['PNG', png(IDAT)], ['JPEG', jpeg], ['footer formats', ico]])('removes the tag from a %s and leaves an untagged one as it is', (_name, image) => {
+    expect(untagImage(tagImage(image, 9)).equals(image)).toBe(true);
+    expect(untagImage(image)).toBe(image);
   });
 });

@@ -23,4 +23,6 @@ contextBridge.exposeInMainWorld('steamManager', {
   openConfigFolder: () => ipcRenderer.invoke('steam-manager:open-config-folder'),
   artwork: (appIds: number[]) => ipcRenderer.invoke('steam-manager:artwork', appIds),
   downloadArtwork: (request: unknown) => ipcRenderer.invoke('steam-manager:download-artwork', request),
+  loadArtworkOptions: (request: unknown) => ipcRenderer.invoke('steam-manager:load-artwork-options', request),
+  chooseArtwork: (pick: unknown) => ipcRenderer.invoke('steam-manager:choose-artwork', pick),
 });

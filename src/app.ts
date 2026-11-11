@@ -1,6 +1,5 @@
-import { artworkCacheDir, copyCachedToGrid, fillCache } from './artwork/cache.js';
+import { artworkCacheDir, choicesFor, copyCachedToGrid, ensureArtwork, type ArtworkOutcome } from './artwork/cache.js';
 import { removeTaggedArtwork } from './artwork/grid.js';
-import type { ArtworkOutcome } from './artwork/install.js';
 import { SteamGridDbClient, type FetchLike } from './artwork/steamgriddb.js';
 import { configDir, loadConfig } from './config.js';
 import { loadSettings } from './settings.js';
@@ -89,7 +88,8 @@ async function ensureSteamClosed(ctx: AppContext, options: GlobalOptions): Promi
 
 function summarize(outcomes: ArtworkOutcome[]): string {
   const count = (status: ArtworkOutcome['status']): number => outcomes.filter((o) => o.status === status).length;
-  return `artwork: ${count('saved')} saved, ${count('exists')} already present, ${count('missing')} not found, ${count('failed')} failed`;
+  const none = count('none');
+  return `artwork: ${count('saved')} saved, ${count('exists')} already present, ${count('missing')} not found, ${count('failed')} failed${none > 0 ? `, ${none} left out` : ''}`;
 }
 
 async function fetchArtwork(
@@ -105,11 +105,15 @@ async function fetchArtwork(
     return;
   }
   const client = new SteamGridDbClient(apiKey, ctx.fetchFn);
-  const { artwork } = await loadSettings(configDir(ctx.platform, ctx.home, ctx.env));
-  const cacheRoot = artworkCacheDir(configDir(ctx.platform, ctx.home, ctx.env));
+  const dir = configDir(ctx.platform, ctx.home, ctx.env);
+  const { artwork } = await loadSettings(dir);
+  const { artworkChoices } = await loadConfig(dir);
+  const prefs = { options: artwork.options, nsfw: artwork.nsfw };
+  const cacheRoot = artworkCacheDir(dir);
   for (const item of items) {
-    // Everything is downloaded once into the app's cache; Steam's grid folder gets copies.
-    const filled = await fillCache({ cacheRoot, title: item.title, client, fetchFn: ctx.fetchFn, force: options.forceArtwork });
+    // Everything is downloaded once into the app's cache; Steam's grid folder gets copies of the images the user selected.
+    const choices = choicesFor(artworkChoices, item.title);
+    const filled = await ensureArtwork({ cacheRoot, title: item.title, client, fetchFn: ctx.fetchFn, prefs, choices, force: options.forceArtwork });
     const failed = new Map(filled.filter((outcome) => outcome.status === 'failed').map((outcome) => [outcome.kind, outcome.error as string]));
     const outcomes = await copyCachedToGrid({
       cacheRoot,
@@ -117,6 +121,8 @@ async function fetchArtwork(
       gridDir: user.gridDir,
       appId: item.appId,
       kinds: artwork.kinds,
+      prefs,
+      choices,
       force: options.forceArtwork,
       failed,
     });

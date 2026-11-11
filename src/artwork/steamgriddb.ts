@@ -35,6 +35,23 @@ const ENDPOINTS: Record<ArtworkKind, Endpoint> = {
   icon: { path: 'icons', query: 'types=static' },
 };
 
+/** One image offered for a game on SteamGridDB. */
+export interface ArtworkCandidate {
+  id: number;
+  /** The full-size image. */
+  url: string;
+  /** A smaller preview. */
+  thumb: string;
+  width: number;
+  height: number;
+  mime: string;
+  /** SteamGridDB's style label, e.g. `alternate`, `white_logo`, `official`. */
+  style: string;
+  nsfw: boolean;
+}
+
+type RawImage = Omit<ArtworkCandidate, 'nsfw'> & { nsfw?: boolean };
+
 interface ApiResponse<T> {
   success: boolean;
   data: T;
@@ -67,10 +84,22 @@ export class SteamGridDbClient {
     return games.find((game) => titleKey(game.name) === wanted)?.id;
   }
 
-  /** Returns the URL of the top-rated image of a given kind for a game, if any. */
-  async findArtworkUrl(gameId: number, kind: ArtworkKind): Promise<string | undefined> {
+  /**
+   * The first `limit` images of a kind for a game, in SteamGridDB's order. Adult images are excluded unless
+   * `nsfw` is set. Only the first page (50 results) is read, which covers the 20 options at most we offer.
+   */
+  async findArtwork(gameId: number, kind: ArtworkKind, { limit, nsfw }: { limit: number; nsfw: boolean }): Promise<ArtworkCandidate[]> {
     const { path, query } = ENDPOINTS[kind];
-    const images = await this.get<{ url: string }[]>(`/${path}/game/${gameId}?${query}`);
-    return images[0]?.url;
+    const images = await this.get<RawImage[]>(`/${path}/game/${gameId}?${query}&nsfw=${nsfw ? 'any' : 'false'}`);
+    return images.slice(0, limit).map((image) => ({
+      id: image.id,
+      url: image.url,
+      thumb: image.thumb,
+      width: image.width,
+      height: image.height,
+      mime: image.mime,
+      style: image.style,
+      nsfw: image.nsfw === true,
+    }));
   }
 }
