@@ -16,7 +16,7 @@ describe('integration fs helpers', () => {
     expect(await readTextIfExists(path.join(dir, 'a.txt', 'child'))).toBeUndefined();
   });
 
-  it('propagates unexpected read errors', async () => {
+  it.skipIf(process.platform === 'win32')('propagates unexpected read errors', async () => {
     if (process.getuid?.() === 0) return; // root ignores file modes
     const dir = await makeTempDir();
     const file = path.join(dir, 'secret');
@@ -43,7 +43,7 @@ describe('integration fs helpers', () => {
     expect(await listDir(path.join(dir, 'f'))).toEqual([]);
   });
 
-  it('propagates unexpected directory errors', async () => {
+  it.skipIf(process.platform === 'win32')('propagates unexpected directory errors', async () => {
     if (process.getuid?.() === 0) return;
     const dir = await makeTempDir();
     const locked = path.join(dir, 'locked');

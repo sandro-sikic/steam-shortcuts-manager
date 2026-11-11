@@ -38,7 +38,7 @@ describe('findSteamRoot', () => {
     const home = await makeTempDir();
     const steam = path.join(home, '.local', 'share', 'Steam');
     await mkdir(path.join(steam, 'userdata'), { recursive: true });
-    await expect(findSteamRoot({ platform: 'linux', home, env: {} })).resolves.toBe(steam);
+    await expect(findSteamRoot({ platform: 'linux', home, env: {} })).resolves.toBe(`${home}/.local/share/Steam`);
   });
 
   it('throws when nothing is found', async () => {

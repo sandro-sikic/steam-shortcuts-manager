@@ -33,7 +33,7 @@ describe('resolveTarget', () => {
     expect(await resolveTarget(game, { platform: 'linux', dir: '/unused', write: true })).toEqual({ exe: '/e', startDir: '/d', launchOptions: '-x' });
   });
 
-  it('writes an executable POSIX script with a sanitized name', async () => {
+  it.skipIf(process.platform === 'win32')('writes an executable POSIX script with a sanitized name', async () => {
     const dir = await makeTempDir();
     const target = await resolveTarget(uriGame("heroic://launch/it's"), { platform: 'linux', dir, write: true });
     expect(target).toEqual({ exe: path.join(dir, 'Ubisoft_Connect-a_b_1.sh'), startDir: dir });

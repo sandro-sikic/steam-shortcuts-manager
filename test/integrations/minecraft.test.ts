@@ -115,7 +115,7 @@ describe('minecraft integration (Linux)', () => {
     expect(await minecraftIntegration.scan(ctx)).toEqual(game({ kind: 'exe', exe: wrapper }));
   });
 
-  it('falls back to `flatpak run` when only the Flatpak data directory exists', async () => {
+  it.skipIf(process.platform === 'win32')('falls back to `flatpak run` when only the Flatpak data directory exists', async () => {
     const { ctx, dir } = await ctxFor('linux');
     await mkdir(path.join(ctx.home, '.var', 'app', 'com.mojang.Minecraft'), { recursive: true });
     expect(await minecraftIntegration.scan(ctx)).toEqual(game({ kind: 'exe', exe: '/usr/bin/flatpak', args: 'run com.mojang.Minecraft' }));

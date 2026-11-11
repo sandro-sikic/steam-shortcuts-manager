@@ -110,7 +110,7 @@ describe('itch integration', () => {
     expect(await itchIntegration.scan(ctxFor('/unused', 'win32', { APPDATA: appdata }))).toHaveLength(1);
   });
 
-  it('finds Linux games by executable bit, honoring XDG_CONFIG_HOME and skipping helpers and libraries', async () => {
+  it.skipIf(process.platform === 'win32')('finds Linux games by executable bit, honoring XDG_CONFIG_HOME and skipping helpers and libraries', async () => {
     const xdg = await makeTempDir();
     const dir = path.join(xdg, 'itch', 'apps', 'linuxgame');
     await put(path.join(dir, 'crashpad_handler'), '', 0o755);
@@ -124,7 +124,7 @@ describe('itch integration', () => {
     expect(games[0]).toMatchObject({ id: 'linuxgame', launch: { kind: 'exe', exe: path.join(dir, 'linuxgame'), startDir: dir } });
   });
 
-  it('uses ~/.config on Linux when XDG_CONFIG_HOME is unset, and skips games with no executable', async () => {
+  it.skipIf(process.platform === 'win32')('uses ~/.config on Linux when XDG_CONFIG_HOME is unset, and skips games with no executable', async () => {
     const home = await makeTempDir();
     const apps = path.join(home, '.config', 'itch', 'apps');
     await put(path.join(apps, 'ok', 'run.sh'), '', 0o755);

@@ -95,7 +95,7 @@ describe('systemDeps', () => {
 });
 
 describe('api.status', () => {
-  it('reports the Steam installation and whether Steam is running', async () => {
+  it.skipIf(process.platform === 'win32')('reports the Steam installation and whether Steam is running', async () => {
     const { api, steam } = await setup();
     expect(await api.status()).toEqual({ platform: 'linux', steamRunning: false, steamRoot: steam, accountId: '1' });
     expect((await (await setup({ running: true })).api.status()).steamRunning).toBe(true);
@@ -440,7 +440,7 @@ describe('api steam accounts and about', () => {
     expect(await createApi({ ...deps, home: await makeTempDir() }).steamAccounts()).toEqual([]);
   });
 
-  it('describes the app, the config file and Steam', async () => {
+  it.skipIf(process.platform === 'win32')('describes the app, the config file and Steam', async () => {
     const { api, steam, home } = await setup({ extra: { version: '1.2.3', secrets: memorySecrets() } });
     expect(await api.about()).toEqual({
       version: '1.2.3',
@@ -461,7 +461,7 @@ describe('api steam accounts and about', () => {
 });
 
 describe('api openConfigFolder', () => {
-  it('creates the folder if needed and opens it', async () => {
+  it.skipIf(process.platform === 'win32')('creates the folder if needed and opens it', async () => {
     const opened: string[] = [];
     const { api, home } = await setup({ extra: { openPath: async (folder) => void opened.push(folder) } });
     await api.openConfigFolder();

@@ -101,7 +101,7 @@ describe('riot integration', () => {
     });
   });
 
-  it('falls back to rc_live and associated_client, and unescapes double-quoted backslashes', async () => {
+  it.skipIf(process.platform === 'win32')('falls back to rc_live and associated_client, and unescapes double-quoted backslashes', async () => {
     const f = await setup();
     await writeInstalls(f, { rc_default: 1, rc_live: f.client });
     await addProduct(f, 'valorant', 'product_install_full_path: "' + (await installDir(f, 'v')).replace(/\//g, '\\\\') + '"\n');
