@@ -36,6 +36,7 @@ describe.skipIf(process.platform === 'win32')('osIntegration on Linux', () => {
 
   it('adds only confident games, tagged as Installed Apps', async () => {
     const games = await osIntegration.scan(await linuxCtx());
+    expect(games.map((g) => g.weak)).toEqual([false, false]);
     expect(games.map((g) => [g.title, g.store, g.id, g.installed])).toEqual([
       ['Alpha Game', 'Installed Apps', 'a', true],
       ['Beta Game', 'Installed Apps', 'b', true],
@@ -72,6 +73,7 @@ describe('osIntegration on other platforms and options', () => {
         : '';
     const base: ScanContext = { platform: 'win32', home: 'C:\\h', env: {}, run };
     expect(await osIntegration.scan(base)).toEqual([]);
-    expect((await osIntegration.scan({ ...base, options: { includeMaybe: true } })).map((g) => g.title)).toEqual(['Unity G']);
+    const guessed = await osIntegration.scan({ ...base, options: { includeMaybe: true } });
+    expect(guessed.map((g) => [g.title, g.weak])).toEqual([['Unity G', true]]);
   });
 });

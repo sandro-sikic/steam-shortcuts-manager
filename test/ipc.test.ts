@@ -9,6 +9,8 @@ function fakeApi(): { [K in keyof SteamManagerApi]: ReturnType<typeof vi.fn> } {
     integrations: vi.fn(async () => 'integrations'),
     apps: vi.fn(async () => 'apps'),
     sync: vi.fn(async () => 'sync'),
+    games: vi.fn(async () => 'games'),
+    setExcluded: vi.fn(async () => 'setExcluded'),
   };
 }
 

@@ -11,6 +11,11 @@ export function normalizeTitle(title: string): string {
     .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
+/** A stable identity for a game across runs; what the user's include/exclude choices are stored against. */
+export function gameKey(game: Pick<Game, 'store' | 'id'>): string {
+  return `${game.store}:${game.id}`;
+}
+
 /** Normalizes an executable path for comparison (quotes, slashes, case). */
 export function normalizeExe(exe: string): string {
   return path.posix.normalize(exe.replace(/^"|"$/g, '').replace(/\\/g, '/')).toLowerCase();

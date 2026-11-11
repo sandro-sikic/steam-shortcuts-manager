@@ -1,16 +1,16 @@
 import { installArtwork, type ArtworkOutcome } from './artwork/install.js';
 import { SteamGridDbClient, type FetchLike } from './artwork/steamgriddb.js';
 import { configDir, loadConfig } from './config.js';
-import { dedupeGames, exeKey, normalizeTitle, type Duplicate, type KnownGames } from './dedupe.js';
+import { dedupeGames, exeKey, gameKey, normalizeTitle, type Duplicate, type KnownGames } from './dedupe.js';
 import { selectIntegrations, availableIntegrations } from './integrations/index.js';
 import type { Classification } from './integrations/os/classify.js';
 import { classifyInstalledApps } from './integrations/os/index.js';
-import type { Integration } from './integrations/types.js';
+import type { Integration, ScanOptions } from './integrations/types.js';
 import { resolveTarget, wrapperDir } from './launcher/wrapper.js';
 import { findSteamRoot, resolveUser, type SteamUser } from './steam/locate.js';
 import { isSteamRunning, type Runner } from './steam/running.js';
 import { listInstalledSteamTitles } from './steam/library.js';
-import { getField, isManaged, shortcutAppId, shortcutTags, shortcutTitle } from './steam/shortcuts.js';
+import { computeAppId, getField, isManaged, quote, shortcutAppId, shortcutTags, shortcutTitle } from './steam/shortcuts.js';
 import { loadShortcuts, saveShortcuts } from './steam/store.js';
 import { planSync, type SyncGame, type SyncItem, type SyncResult } from './steam/sync.js';
 import type { VdfMap } from './vdf/types.js';
@@ -59,7 +59,7 @@ export async function openUser(ctx: AppContext, options: GlobalOptions): Promise
 }
 
 /** Games that already exist: installed in Steam itself, or shortcuts the user added by hand. */
-async function knownGames(user: SteamUser, existing: VdfMap[]): Promise<KnownGames> {
+export async function knownGames(user: SteamUser, existing: VdfMap[]): Promise<KnownGames> {
   const known: KnownGames = { titles: new Map(), launchKeys: new Map() };
   for (const title of await listInstalledSteamTitles(user.root)) {
     known.titles.set(normalizeTitle(title), `${title} (installed in Steam)`);
@@ -133,7 +133,7 @@ function report(ctx: AppContext, result: SyncResult, duplicates: Duplicate[], dr
 }
 
 /** Resolves each game's launch spec to a shortcut target, generating wrapper scripts as needed. */
-async function resolveGames(ctx: AppContext, games: Game[], write: boolean): Promise<SyncGame[]> {
+export async function resolveGames(ctx: AppContext, games: Game[], write: boolean): Promise<SyncGame[]> {
   const dir = wrapperDir(ctx.platform, ctx.home, ctx.env);
   return Promise.all(
     games.map(async (game) => {
@@ -149,12 +149,16 @@ async function applyGames(
   games: Game[],
   options: GlobalOptions & SyncCommandOptions,
   dedupe: boolean,
+  excluded: ReadonlySet<string>,
 ): Promise<SyncResult> {
   const user = await openUser(ctx, options);
   const existing = await loadShortcuts(user.configDir);
   const { unique, duplicates } = dedupe ? dedupeGames(games, await knownGames(user, existing)) : { unique: games, duplicates: [] };
-  const resolved = await resolveGames(ctx, unique, !options.dryRun);
-  const result = planSync(existing, resolved, { prune: Boolean(options.prune) });
+  const included = unique.filter((game) => !excluded.has(gameKey(game)));
+  const switchedOff = unique.filter((game) => excluded.has(gameKey(game)));
+  const resolved = await resolveGames(ctx, included, !options.dryRun);
+  const remove = new Set((await resolveGames(ctx, switchedOff, false)).map((game) => computeAppId(quote(game.exe), game.title)));
+  const result = planSync(existing, resolved, { prune: Boolean(options.prune), remove });
   report(ctx, result, duplicates, Boolean(options.dryRun));
   if (options.dryRun) return result;
 
@@ -168,6 +172,25 @@ async function applyGames(
   return result;
 }
 
+/** Runs the given integrations; one that fails is reported as a warning and the others still run. */
+export async function scanIntegrations(
+  ctx: AppContext,
+  selected: Integration[],
+  options: ScanOptions,
+): Promise<{ games: Game[]; warnings: string[] }> {
+  const scanContext = { platform: ctx.platform, home: ctx.home, env: ctx.env, run: ctx.runner, options };
+  const games: Game[] = [];
+  const warnings: string[] = [];
+  for (const integration of selected) {
+    try {
+      games.push(...(await integration.scan(scanContext)));
+    } catch (error) {
+      warnings.push(`Could not scan ${integration.label}: ${(error as Error).message}`);
+    }
+  }
+  return { games, warnings };
+}
+
 export async function runSync(ctx: AppContext, options: GlobalOptions & SyncCommandOptions): Promise<SyncResult | undefined> {
   const selected = selectIntegrations(ctx.platform, options.only, ctx.integrations);
   if (selected.length === 0) {
@@ -175,22 +198,9 @@ export async function runSync(ctx: AppContext, options: GlobalOptions & SyncComm
     return undefined;
   }
   const config = await loadConfig(configDir(ctx.platform, ctx.home, ctx.env));
-  const scanContext = {
-    platform: ctx.platform,
-    home: ctx.home,
-    env: ctx.env,
-    run: ctx.runner,
-    options: { includeMaybe: options.includeMaybe, allow: config.allow, deny: config.deny },
-  };
-  const games: Game[] = [];
-  for (const integration of selected) {
-    try {
-      games.push(...(await integration.scan(scanContext)));
-    } catch (error) {
-      ctx.log(`Could not scan ${integration.label}: ${(error as Error).message}`);
-    }
-  }
-  return applyGames(ctx, games, options, true);
+  const { games, warnings } = await scanIntegrations(ctx, selected, { includeMaybe: options.includeMaybe, allow: config.allow, deny: config.deny });
+  for (const warning of warnings) ctx.log(warning);
+  return applyGames(ctx, games, options, true, new Set(config.exclude));
 }
 
 export async function runIntegrations(ctx: AppContext): Promise<void> {
@@ -210,7 +220,7 @@ export async function runAdd(ctx: AppContext, options: GlobalOptions & AddComman
     installed: true,
     launch: { kind: 'exe', exe: options.exe, startDir: options.startDir, args: options.launchOptions },
   };
-  const result = await applyGames(ctx, [game], options, false);
+  const result = await applyGames(ctx, [game], options, false, new Set());
   if (result.skipped.length > 0) {
     throw new Error(`"${options.title}" already exists as a shortcut that steam-manager does not manage.`);
   }

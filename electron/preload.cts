@@ -7,5 +7,7 @@ contextBridge.exposeInMainWorld('steamManager', {
   shortcuts: () => ipcRenderer.invoke('steam-manager:shortcuts'),
   integrations: () => ipcRenderer.invoke('steam-manager:integrations'),
   apps: (all: boolean) => ipcRenderer.invoke('steam-manager:apps', all),
+  games: (request: unknown) => ipcRenderer.invoke('steam-manager:games', request),
+  setExcluded: (keys: string[], excluded: boolean) => ipcRenderer.invoke('steam-manager:set-excluded', keys, excluded),
   sync: (request: unknown) => ipcRenderer.invoke('steam-manager:sync', request),
 });

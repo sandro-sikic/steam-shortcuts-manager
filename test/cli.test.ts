@@ -80,6 +80,46 @@ describe('list', () => {
   });
 });
 
+describe('switched-off games', () => {
+  const exclude = async (home: string, keys: string[]) => {
+    const dir = path.join(home, '.config', 'steam-manager');
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'config.json'), JSON.stringify({ exclude: keys }));
+  };
+
+  it('does not add a game the user switched off', async () => {
+    const other: Game = { ...fortnite, id: 'rl', title: 'Rocket League', launch: { kind: 'exe', exe: '/games/rl' } };
+    const { run, home, configDir } = await setup({ integrations: [integration([fortnite, other])] });
+    await exclude(home, ['Epic Games:fn']);
+    await run('sync', '--no-artwork');
+    expect((await loadShortcuts(configDir)).map((e) => e.get('AppName'))).toEqual(['Rocket League']);
+  });
+
+  it('removes our shortcut when the game is switched off later, and re-adds it when switched on', async () => {
+    const { run, home, configDir } = await setup({ integrations: [integration([fortnite])] });
+    await run('sync', '--no-artwork');
+    expect(await loadShortcuts(configDir)).toHaveLength(1);
+
+    await exclude(home, ['Epic Games:fn']);
+    await run('sync', '--no-artwork');
+    expect(await loadShortcuts(configDir)).toEqual([]);
+
+    await exclude(home, []);
+    await run('sync', '--no-artwork');
+    expect(await loadShortcuts(configDir)).toHaveLength(1);
+  });
+
+  it('removes the shortcut of a switched-off game that is started through a wrapper script', async () => {
+    const uriGame: Game = { store: 'Ubisoft Connect', id: '720', title: 'Anno', installed: true, launch: { kind: 'uri', uri: 'uplay://launch/720/0' } };
+    const { run, home, configDir } = await setup({ integrations: [integration([uriGame])] });
+    await run('sync', '--no-artwork');
+    expect(await loadShortcuts(configDir)).toHaveLength(1);
+    await exclude(home, ['Ubisoft Connect:720']);
+    await run('sync', '--no-artwork');
+    expect(await loadShortcuts(configDir)).toEqual([]);
+  });
+});
+
 describe('integrations', () => {
   it('lists the integrations available on this platform', async () => {
     const { run, logs } = await setup({ integrations: [integration([]), integration([], { id: 'win', label: 'Windows Only', platforms: ['win32'] })] });

@@ -31,6 +31,8 @@ export interface SyncItem {
 export interface SyncOptions {
   /** Remove managed shortcuts whose game is no longer provided (e.g. uninstalled). */
   prune: boolean;
+  /** App IDs of games the user switched off: our shortcuts for them are removed even without `prune`. */
+  remove?: ReadonlySet<number>;
 }
 
 export interface SyncResult {
@@ -111,7 +113,7 @@ export function planSync(existing: VdfMap[], games: SyncGame[], options: SyncOpt
   for (const entry of existing) {
     const appId = shortcutAppId(entry);
     if (replaced.has(appId)) continue;
-    if (options.prune && isManaged(entry) && !handled.has(appId)) {
+    if (isManaged(entry) && !handled.has(appId) && (options.prune || options.remove?.has(appId))) {
       result.removed.push(describe(appId, shortcutTitle(entry), storeOf(entry)));
       continue;
     }

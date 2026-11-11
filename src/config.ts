@@ -1,3 +1,4 @@
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { readTextIfExists } from './integrations/shared/fs.js';
 
@@ -12,12 +13,14 @@ export function configDir(platform: NodeJS.Platform, home: string, env: NodeJS.P
   return path.posix.join(env['XDG_CONFIG_HOME'] || path.posix.join(home, '.config'), 'steam-manager');
 }
 
-/** User overrides for the installed-apps scan, matched against an app's title or id. */
+/** User choices, stored in `config.json`. */
 export interface Config {
-  /** Always treat these as games. */
+  /** Installed apps (by title or id) that are always games. */
   allow: string[];
-  /** Never treat these as games. */
+  /** Installed apps (by title or id) that are never games. */
   deny: string[];
+  /** Keys of games (`store:id`) the user switched off: they are not added to Steam, and ours are removed. */
+  exclude: string[];
 }
 
 function stringList(value: unknown, name: string, file: string): string[] {
@@ -28,11 +31,15 @@ function stringList(value: unknown, name: string, file: string): string[] {
   return value as string[];
 }
 
-/** Loads `config.json` from the config dir; a missing file means no overrides. */
-export async function loadConfig(dir: string): Promise<Config> {
-  const file = path.join(dir, 'config.json');
+function configFile(dir: string): string {
+  return path.join(dir, 'config.json');
+}
+
+/** Parses the raw config; a missing file is an empty object, an unreadable one an error. */
+async function readRaw(dir: string): Promise<Record<string, unknown>> {
+  const file = configFile(dir);
   const text = await readTextIfExists(file);
-  if (text === undefined) return { allow: [], deny: [] };
+  if (text === undefined) return {};
   let data: unknown;
   try {
     data = JSON.parse(text);
@@ -42,6 +49,25 @@ export async function loadConfig(dir: string): Promise<Config> {
   if (typeof data !== 'object' || data === null || Array.isArray(data)) {
     throw new Error(`Invalid config file ${file}: expected a JSON object`);
   }
-  const record = data as Record<string, unknown>;
-  return { allow: stringList(record['allow'], 'allow', file), deny: stringList(record['deny'], 'deny', file) };
+  return data as Record<string, unknown>;
+}
+
+/** Loads `config.json` from the config dir; a missing file means no overrides. */
+export async function loadConfig(dir: string): Promise<Config> {
+  const record = await readRaw(dir);
+  const file = configFile(dir);
+  return {
+    allow: stringList(record['allow'], 'allow', file),
+    deny: stringList(record['deny'], 'deny', file),
+    exclude: stringList(record['exclude'], 'exclude', file),
+  };
+}
+
+/** Saves some of the user's choices, keeping everything else in the file. Refuses to overwrite an invalid file. */
+export async function updateConfig(dir: string, patch: Partial<Config>): Promise<Config> {
+  const raw = await readRaw(dir);
+  const next = { ...(await loadConfig(dir)), ...patch };
+  await mkdir(dir, { recursive: true });
+  await writeFile(configFile(dir), `${JSON.stringify({ ...raw, ...next }, null, 2)}\n`);
+  return next;
 }

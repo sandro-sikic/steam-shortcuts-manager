@@ -19,7 +19,7 @@ npm run start    # production build, then launch Electron
 - `electron/main.ts` creates the window (context isolation and sandbox on, no node integration, navigation locked)
   and `electron/preload.cts` exposes the bridge. The CommonJS preload repeats the channel names from `src/ipc.ts`;
   a test keeps them in sync.
-- `src/ipc.ts` is the typed contract (status, shortcuts, integrations, apps, sync) and `src/api.ts` implements it on
+- `src/ipc.ts` is the typed contract (status, shortcuts, integrations, apps, games, setExcluded, sync) and `src/api.ts` implements it on
   top of the same code the CLI uses, returning data instead of printing. To add a feature: add the method to
   `SteamManagerApi` and `CHANNELS`, implement it in `api.ts`, repeat the channel in the preload, and call it from the UI.
 - The UI defaults to a dry run. Syncing writes only while Steam is closed.
@@ -72,6 +72,20 @@ The tests use fixture files and fake registry output. Each integration file star
 (game names and process names), the Windows Game Bar and Unity/Unreal detection, Xbox (`shell:AppsFolder` launch), Heroic (`heroic://launch/...` URI),
 and the Windows `.cmd` wrapper itself. Run `steam-manager sync --dry-run` on each platform first.
 
+## Choosing what goes to Steam
+
+The library in the desktop app lists every installed game found on this computer, grouped by launcher
+(Epic Games, GOG Galaxy, Heroic (Epic Games), Installed Apps, ...). Each game, each group and a global
+"Select all" has a checkbox: checked means "add to Steam". Each card shows what Apply will do
+(In Steam, Will add, Will remove). **Apply makes Steam match the checkboxes**: checked games are added, and
+unchecked games that we added earlier are removed (only ours, never your own shortcuts).
+
+Unchecking saves the game's key (`store:id`) to the `exclude` list in `config.json`, so the CLI `sync` respects it too:
+
+```json
+{ "allow": ["Some Game"], "deny": ["Some Tool"], "exclude": ["Epic Games:fn"] }
+```
+
 ## Installed apps (OS scan)
 
 The `os` integration ("Installed Apps" tag) scans the operating system's installed applications for games
@@ -81,7 +95,7 @@ that no launcher integration covers. It is **strict**: only apps the OS or you m
 - **Windows:** games Game Bar recognizes (`MatchedExeFullPath`). Unity/Unreal installs are only "maybe" and need `--include-maybe`.
 - `steam-manager apps [--all]` shows the verdict and reason per app. Override it in
   `<config>/steam-manager/config.json` (`~/.config/...` on Linux, `%APPDATA%` on Windows):
-  `{ "allow": ["Some Game"], "deny": ["Some Tool"] }` (matched by title or id).
+  `{ "allow": ["Some Game"], "deny": ["Some Tool"] }` (matched by title or id; `exclude` is described above).
 
 ## Duplicates
 

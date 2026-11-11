@@ -2,10 +2,11 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { api, errorMessage } from '../../src/UI/api.js';
+import { Check } from '../../src/UI/Check.js';
 import { Header } from '../../src/UI/Header.js';
 import { Library } from '../../src/UI/Library.js';
 import { SyncPanel } from '../../src/UI/SyncPanel.js';
-import { emptyReport, installApi, integrations, okStatus, shortcuts } from './mockApi.js';
+import { emptyReport, gamesReport, installApi, integrations, okStatus, shortcuts } from './mockApi.js';
 
 afterEach(cleanup);
 
@@ -60,49 +61,195 @@ describe('Header', () => {
   });
 });
 
+describe('Check', () => {
+  it('shows a mixed state as indeterminate and reports the next value', () => {
+    const onChange = vi.fn();
+    render(<Check checked={false} indeterminate label="Some" onChange={onChange} />);
+    const box = screen.getByRole('checkbox', { name: 'Some' }) as HTMLInputElement;
+    expect(box.indeterminate).toBe(true);
+    fireEvent.click(box);
+    expect(onChange).toHaveBeenCalledWith(true);
+  });
+
+  it('is a plain checkbox otherwise', () => {
+    render(<Check checked label="All" onChange={() => undefined} />);
+    const box = screen.getByRole('checkbox', { name: 'All' }) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    expect(box.indeterminate).toBe(false);
+  });
+});
+
 describe('Library', () => {
-  it('shows a game card per shortcut with its tags and origin', () => {
-    render(<Library shortcuts={shortcuts} loading={false} />);
-    expect(screen.getByRole('heading', { name: /Library/ }).textContent).toContain('2');
+  const renderLibrary = (props: Partial<Parameters<typeof Library>[0]> = {}) => {
+    const onToggle = vi.fn();
+    render(<Library report={gamesReport} shortcuts={shortcuts} loading={false} onToggle={onToggle} {...props} />);
+    return onToggle;
+  };
+  const box = (name: string | RegExp) => screen.getByRole('checkbox', { name }) as HTMLInputElement;
+
+  it('groups the games by launcher with how many are selected, and no store tags on the cards', () => {
+    renderLibrary();
+    const epic = within(screen.getByRole('region', { name: 'Epic Games' }));
+    const gog = within(screen.getByRole('region', { name: 'GOG Galaxy' }));
+    expect(epic.getByText('2/2')).toBeTruthy();
+    expect(epic.getByText('Fortnite')).toBeTruthy();
+    expect(epic.getByText('Rocket League')).toBeTruthy();
+    expect(gog.getByText('0/2')).toBeTruthy();
+    expect(gog.getByText('Hades')).toBeTruthy();
+    expect(screen.getAllByText('Epic Games')).toHaveLength(1);
+    expect(screen.getByRole('heading', { name: /Library/ }).textContent).toContain('4');
+  });
+
+  it('sorts the groups and the games in them by name', () => {
+    const game = (store: string, id: string, title: string) => ({ key: `${store}:${id}`, store, id, title, appId: Math.random(), weak: false, inSteam: false, excluded: false });
+    const report = { ...gamesReport, games: [game('Zeta Launcher', 'z', 'Zed'), game('Alpha Launcher', 'b', 'Bee'), game('Alpha Launcher', 'a', 'Ant')] };
+    renderLibrary({ report, shortcuts: [] });
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Alpha Launcher', 'Zeta Launcher']);
+    const alpha = within(screen.getByRole('region', { name: 'Alpha Launcher' }));
+    expect(alpha.getAllByText(/^(Ant|Bee)$/).map((el) => el.textContent)).toEqual(['Ant', 'Bee']);
+  });
+
+  it('shows the groups in order: launchers, your shortcuts, no longer found', () => {
+    renderLibrary();
+    expect(screen.getAllByRole('heading', { level: 3 }).map((h) => h.textContent)).toEqual(['Epic Games', 'GOG Galaxy', 'Your shortcuts', 'No longer found']);
+  });
+
+  it('shows what will happen to each game and marks weak guesses', () => {
+    renderLibrary();
+    expect(screen.getByText('In Steam')).toBeTruthy();
+    expect(screen.getByText('Will add')).toBeTruthy();
+    expect(screen.getByText('Will remove')).toBeTruthy();
+    expect(screen.getByText('Guess')).toBeTruthy();
+    // Tiny Guess is switched off and not in Steam: nothing will happen to it
+    expect(within(screen.getByText('Tiny Guess').closest('li') as HTMLElement).queryByText(/Will|In Steam/)).toBeNull();
+  });
+
+  it('switches one game on or off by clicking its checkbox', () => {
+    const onToggle = renderLibrary();
+    fireEvent.click(box(/Fortnite/));
+    expect(onToggle).toHaveBeenLastCalledWith(['Epic Games:fn'], false);
+    fireEvent.click(box(/Hades/));
+    expect(onToggle).toHaveBeenLastCalledWith(['GOG Galaxy:hades'], true);
+  });
+
+  it('switches a whole launcher on or off, and shows a partly selected one as mixed', () => {
+    const onToggle = renderLibrary();
+    expect(box('Select all Epic Games').checked).toBe(true);
+    expect(box('Select all GOG Galaxy').checked).toBe(false);
+    fireEvent.click(box('Select all Epic Games'));
+    expect(onToggle).toHaveBeenLastCalledWith(['Epic Games:fn', 'Epic Games:rl'], false);
+    fireEvent.click(box('Select all GOG Galaxy'));
+    expect(onToggle).toHaveBeenLastCalledWith(['GOG Galaxy:hades', 'GOG Galaxy:guess'], true);
+
+    cleanup();
+    const mixed = { ...gamesReport, games: gamesReport.games.map((g) => (g.key === 'Epic Games:rl' ? { ...g, excluded: true } : g)) };
+    const again = renderLibrary({ report: mixed });
+    expect(box('Select all Epic Games').indeterminate).toBe(true);
+    fireEvent.click(box('Select all Epic Games'));
+    expect(again).toHaveBeenLastCalledWith(['Epic Games:fn', 'Epic Games:rl'], true);
+  });
+
+  it('has a select all for everything, mixed unless all or none are on', () => {
+    const onToggle = renderLibrary();
+    expect(screen.getByText('2 of 4 selected for Steam')).toBeTruthy();
+    expect(box('Select all games').indeterminate).toBe(true);
+    expect(box('Select all games').checked).toBe(false);
+    fireEvent.click(box('Select all games'));
+    expect(onToggle).toHaveBeenLastCalledWith(['Epic Games:fn', 'Epic Games:rl', 'GOG Galaxy:hades', 'GOG Galaxy:guess'], true);
+  });
+
+  it('turns everything off when everything is on', () => {
+    const everything = { ...gamesReport, games: gamesReport.games.map((g) => ({ ...g, excluded: false })) };
+    const onToggle = renderLibrary({ report: everything });
+    expect(box('Select all games').checked).toBe(true);
+    fireEvent.click(box('Select all games'));
+    expect(onToggle).toHaveBeenLastCalledWith(['Epic Games:fn', 'Epic Games:rl', 'GOG Galaxy:hades', 'GOG Galaxy:guess'], false);
+  });
+
+  it('shows your own shortcuts and ones whose game is gone, without checkboxes', () => {
+    renderLibrary();
+    const yours = within(screen.getByRole('region', { name: 'Your shortcuts' }));
+    expect(yours.getByText('My Own Game')).toBeTruthy();
+    expect(yours.getByText('Yours').getAttribute('title')).toBe('Added by you');
+    expect(yours.queryByRole('checkbox')).toBeNull();
+    const gone = within(screen.getByRole('region', { name: 'No longer found' }));
+    expect(gone.getByText('Old Game')).toBeTruthy();
+    expect(gone.getByText('Not found').getAttribute('title')).toBe('Created by Steam Manager');
+    expect(gone.queryByRole('checkbox')).toBeNull();
+  });
+
+  it('does not list a game under "no longer found" while it is still found', () => {
+    renderLibrary();
+    expect(within(screen.getByRole('region', { name: 'No longer found' })).queryByText('Fortnite')).toBeNull();
+  });
+
+  it('filters everything by search, and select all then acts only on what is shown', () => {
+    const onToggle = renderLibrary();
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search games' }), { target: { value: '  FORT ' } });
     expect(screen.getByText('Fortnite')).toBeTruthy();
-    expect(screen.getByText('Epic Games')).toBeTruthy();
-    expect(screen.getByText('Synced').getAttribute('title')).toBe('Created by Steam Manager');
-    expect(screen.getByText('Yours').getAttribute('title')).toBe('Added by you');
-    expect(screen.getByText('My Own Game')).toBeTruthy();
+    expect(screen.queryByText('Rocket League')).toBeNull();
+    expect(screen.queryByRole('region', { name: 'GOG Galaxy' })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Your shortcuts' })).toBeNull();
+    fireEvent.click(box('Select all games'));
+    expect(onToggle).toHaveBeenLastCalledWith(['Epic Games:fn'], false);
   });
 
-  it('shows placeholders while loading, without a count', () => {
-    render(<Library shortcuts={[]} loading />);
-    expect(screen.getByLabelText('Loading library').getAttribute('aria-busy')).toBe('true');
-    expect(screen.getByRole('heading', { name: /Library/ }).textContent?.trim()).toBe('Library');
-  });
-
-  it('shows an empty state when there are no shortcuts', () => {
-    render(<Library shortcuts={[]} loading={false} />);
-    expect(screen.getByText('No games yet')).toBeTruthy();
-  });
-
-  it('filters by search, ignoring case, and says when nothing matches', () => {
-    render(<Library shortcuts={shortcuts} loading={false} />);
+  it('finds shortcuts by search too, and says when nothing matches', () => {
+    renderLibrary();
     const search = screen.getByRole('searchbox', { name: 'Search games' });
-    fireEvent.change(search, { target: { value: '  FORT ' } });
-    expect(screen.getByText('Fortnite')).toBeTruthy();
-    expect(screen.queryByText('My Own Game')).toBeNull();
-
+    fireEvent.change(search, { target: { value: 'old' } });
+    expect(screen.getByText('Old Game')).toBeTruthy();
+    expect(screen.queryByRole('checkbox', { name: 'Select all games' })).toBeNull();
     fireEvent.change(search, { target: { value: 'zelda' } });
     expect(screen.getByText('No matches')).toBeTruthy();
     expect(screen.getByText('Nothing in your library matches “zelda”.')).toBeTruthy();
+  });
 
-    fireEvent.change(search, { target: { value: '' } });
+  it('lists skipped duplicates, singular and plural', () => {
+    renderLibrary();
+    expect(screen.getByText('1 duplicate skipped')).toBeTruthy();
+    expect(screen.getByText(/is the same as Control \[Heroic \(Epic Games\)\]/)).toBeTruthy();
+    cleanup();
+    const two = { ...gamesReport, duplicates: [...gamesReport.duplicates, { title: 'Hades', store: 'Installed Apps', of: 'Hades [GOG Galaxy]' }] };
+    renderLibrary({ report: two });
+    expect(screen.getByText('2 duplicates skipped')).toBeTruthy();
+  });
+
+  it('shows placeholders while loading, without a count, selection bar or duplicates', () => {
+    renderLibrary({ report: { games: [], duplicates: gamesReport.duplicates, warnings: [] }, shortcuts: [], loading: true });
+    expect(screen.getByLabelText('Loading library').getAttribute('aria-busy')).toBe('true');
+    expect(screen.getByRole('heading', { name: /Library/ }).textContent?.trim()).toBe('Library');
+    expect(screen.queryByText('Select all')).toBeNull();
+    expect(screen.queryByText(/duplicate/)).toBeNull();
+  });
+
+  it('shows an empty state when there is nothing at all, and still shows shortcuts when there are no games', () => {
+    renderLibrary({ report: { games: [], duplicates: [], warnings: [] }, shortcuts: [] });
+    expect(screen.getByText('No games found')).toBeTruthy();
+    cleanup();
+    renderLibrary({ report: { games: [], duplicates: [], warnings: [] } });
     expect(screen.getByText('My Own Game')).toBeTruthy();
+    expect(screen.queryByText('No games found')).toBeNull();
+    expect(screen.queryByText('Select all')).toBeNull();
   });
 });
 
 describe('SyncPanel', () => {
   const renderPanel = (props: Partial<Parameters<typeof SyncPanel>[0]> = {}) => {
     const onChanged = vi.fn();
-    render(<SyncPanel integrations={integrations} disabled={false} onChanged={onChanged} {...props} />);
-    return onChanged;
+    const onIncludeMaybe = vi.fn();
+    render(
+      <SyncPanel
+        integrations={integrations}
+        disabled={false}
+        includeMaybe={false}
+        onIncludeMaybe={onIncludeMaybe}
+        pending={{ add: 0, remove: 0 }}
+        onChanged={onChanged}
+        {...props}
+      />,
+    );
+    return { onChanged, onIncludeMaybe };
   };
   const toggle = (label: RegExp) => screen.getByRole('switch', { name: label }) as HTMLInputElement;
   const mode = (name: string) => screen.getByRole('radio', { name }) as HTMLButtonElement;
@@ -130,6 +277,26 @@ describe('SyncPanel', () => {
     expect(screen.getByRole('button', { name: 'Preview changes' })).toBeTruthy();
   });
 
+  it('says what the selection will change in Steam', () => {
+    installApi();
+    renderPanel();
+    expect(screen.getByText('Steam already matches your selection.')).toBeTruthy();
+    cleanup();
+    renderPanel({ pending: { add: 3, remove: 1 } });
+    expect(screen.getByText('3 to add · 1 to remove')).toBeTruthy();
+    cleanup();
+    renderPanel({ pending: { add: 0, remove: 2 } });
+    expect(screen.getByText('0 to add · 2 to remove')).toBeTruthy();
+  });
+
+  it('lets the app decide whether weak guesses are listed', () => {
+    installApi();
+    const { onIncludeMaybe } = renderPanel({ includeMaybe: true });
+    expect(toggle(/weak guesses/).checked).toBe(true);
+    fireEvent.click(toggle(/weak guesses/));
+    expect(onIncludeMaybe).toHaveBeenCalledWith(false);
+  });
+
   it('switches to apply mode and says it writes to Steam', () => {
     installApi();
     renderPanel();
@@ -145,14 +312,14 @@ describe('SyncPanel', () => {
     const mock = installApi({
       sync: vi.fn(async () => ({ ...emptyReport, log: ['[dry run] Added:', '  Fortnite [Epic Games]'], added: [{ appId: 1, title: 'Fortnite', store: 'Epic Games' }] })),
     });
-    const onChanged = renderPanel();
+    const { onChanged } = renderPanel({ includeMaybe: true });
     fireEvent.click(toggle(/Remove shortcuts/));
     fireEvent.click(toggle(/Download artwork/));
     fireEvent.click(screen.getByRole('button', { name: 'Preview changes' }));
 
     await screen.findByLabelText('1 added');
     expect(screen.getByLabelText('0 updated')).toBeTruthy();
-    expect(mock.sync).toHaveBeenCalledWith({ dryRun: true, prune: true, includeMaybe: false, artwork: false });
+    expect(mock.sync).toHaveBeenCalledWith({ dryRun: true, prune: true, includeMaybe: true, artwork: false });
     expect(screen.getByText('Preview only. Nothing was changed.')).toBeTruthy();
     expect(screen.getByLabelText('Log').textContent).toContain('Fortnite [Epic Games]');
     expect(onChanged).not.toHaveBeenCalled();
@@ -160,19 +327,18 @@ describe('SyncPanel', () => {
 
   it('applies for real, then asks the app to refresh', async () => {
     const mock = installApi();
-    const onChanged = renderPanel();
+    const { onChanged } = renderPanel();
     fireEvent.click(mode('Apply'));
-    fireEvent.click(toggle(/weak guesses/));
     fireEvent.click(screen.getByRole('button', { name: 'Apply to Steam' }));
     await waitFor(() => expect(onChanged).toHaveBeenCalledTimes(1));
-    expect(mock.sync).toHaveBeenCalledWith({ dryRun: false, prune: false, includeMaybe: true, artwork: true });
+    expect(mock.sync).toHaveBeenCalledWith({ dryRun: false, prune: false, includeMaybe: false, artwork: true });
     expect(screen.queryByText('Preview only. Nothing was changed.')).toBeNull();
     expect(screen.queryByLabelText('Log')).toBeNull();
   });
 
   it('shows the error in the report and does not refresh', async () => {
     installApi({ sync: vi.fn(async () => ({ ...emptyReport, error: 'Steam is running' })) });
-    const onChanged = renderPanel();
+    const { onChanged } = renderPanel();
     fireEvent.click(mode('Apply'));
     fireEvent.click(screen.getByRole('button', { name: 'Apply to Steam' }));
     expect((await screen.findByRole('alert')).textContent).toBe('Steam is running');

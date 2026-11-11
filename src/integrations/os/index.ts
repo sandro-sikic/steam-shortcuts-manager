@@ -36,7 +36,7 @@ export const osIntegration: Integration = {
     const games: Game[] = [];
     for (const { app, verdict } of await classifyInstalledApps(ctx)) {
       if (verdict === 'game' || (includeMaybe && verdict === 'maybe')) {
-        games.push({ store: LABEL, id: app.id, title: app.name, installed: true, launch: app.launch });
+        games.push({ store: LABEL, id: app.id, title: app.name, installed: true, weak: verdict === 'maybe', launch: app.launch });
       }
     }
     return games;

@@ -33,6 +33,44 @@ export interface AppInfo {
   reason: string;
 }
 
+/** A game found on this computer by one of the launcher integrations. */
+export interface GameInfo {
+  /** Stable identity (`store:id`); what the user's choices are stored against. */
+  key: string;
+  /** The launcher the game belongs to, e.g. "Epic Games". */
+  store: string;
+  id: string;
+  title: string;
+  /** The Steam shortcut ID the game has (or would have). */
+  appId: number;
+  /** Only a weak guess that this is a game. */
+  weak: boolean;
+  /** We already added it to Steam. */
+  inSteam: boolean;
+  /** The user switched it off: it is not added to Steam, and our shortcut for it is removed on the next sync. */
+  excluded: boolean;
+}
+
+export interface DuplicateInfo {
+  title: string;
+  store: string;
+  /** What it duplicates, e.g. "Hades [GOG Galaxy]". */
+  of: string;
+}
+
+export interface GamesReport {
+  games: GameInfo[];
+  /** Games dropped because they duplicate another one. */
+  duplicates: DuplicateInfo[];
+  /** Launchers that could not be scanned. */
+  warnings: string[];
+}
+
+export interface GamesRequest {
+  /** Also list weak guesses (Unity/Unreal installs). */
+  includeMaybe: boolean;
+}
+
 export interface SyncRequest {
   /** Show what would change without writing anything. */
   dryRun: boolean;
@@ -67,6 +105,10 @@ export interface SteamManagerApi {
   integrations(): Promise<IntegrationInfo[]>;
   /** `all` also returns apps judged not to be games. */
   apps(all: boolean): Promise<AppInfo[]>;
+  /** The games found on this computer, ready to be ticked on or off. */
+  games(request: GamesRequest): Promise<GamesReport>;
+  /** Switches games off (`excluded` true) or back on, by key. The choice is saved and used by every sync. */
+  setExcluded(keys: string[], excluded: boolean): Promise<void>;
   sync(request: SyncRequest): Promise<SyncReport>;
 }
 
@@ -75,6 +117,8 @@ export const CHANNELS = {
   shortcuts: 'steam-manager:shortcuts',
   integrations: 'steam-manager:integrations',
   apps: 'steam-manager:apps',
+  games: 'steam-manager:games',
+  setExcluded: 'steam-manager:set-excluded',
   sync: 'steam-manager:sync',
 } as const satisfies Record<keyof SteamManagerApi, string>;
 

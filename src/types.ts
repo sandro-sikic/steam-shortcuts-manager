@@ -28,5 +28,7 @@ export interface Game {
   id: string;
   title: string;
   installed: boolean;
+  /** Only a weak guess that this is a game (e.g. a Unity install), so it is off by default. */
+  weak?: boolean;
   launch: LaunchSpec;
 }

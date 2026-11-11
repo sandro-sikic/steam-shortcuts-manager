@@ -5,7 +5,6 @@ import { SyncIcon } from './icons.js';
 
 const SWITCHES = [
   { key: 'prune', label: 'Remove shortcuts for games that are gone' },
-  { key: 'includeMaybe', label: 'Include weak guesses (Unity/Unreal installs)' },
   { key: 'artwork', label: 'Download artwork from SteamGridDB' },
 ] as const;
 
@@ -20,9 +19,23 @@ const COUNTS = [
 type Mode = 'preview' | 'apply';
 type Toggles = Record<(typeof SWITCHES)[number]['key'], boolean>;
 
-export function SyncPanel({ integrations, disabled, onChanged }: { integrations: IntegrationInfo[]; disabled: boolean; onChanged: () => void }) {
+export function SyncPanel({
+  integrations,
+  disabled,
+  includeMaybe,
+  onIncludeMaybe,
+  pending,
+  onChanged,
+}: {
+  integrations: IntegrationInfo[];
+  disabled: boolean;
+  includeMaybe: boolean;
+  onIncludeMaybe: (next: boolean) => void;
+  pending: { add: number; remove: number };
+  onChanged: () => void;
+}) {
   const [mode, setMode] = useState<Mode>('preview');
-  const [toggles, setToggles] = useState<Toggles>({ prune: false, includeMaybe: false, artwork: true });
+  const [toggles, setToggles] = useState<Toggles>({ prune: false, artwork: true });
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ report: SyncReport; dryRun: boolean }>();
   const [failure, setFailure] = useState<string>();
@@ -32,7 +45,7 @@ export function SyncPanel({ integrations, disabled, onChanged }: { integrations:
     setBusy(true);
     setFailure(undefined);
     try {
-      const report = await api().sync({ dryRun, ...toggles });
+      const report = await api().sync({ dryRun, includeMaybe, ...toggles });
       setResult({ report, dryRun });
       if (!dryRun && !report.error) onChanged();
     } catch (error) {
@@ -76,7 +89,18 @@ export function SyncPanel({ integrations, disabled, onChanged }: { integrations:
             <span>{label}</span>
           </label>
         ))}
+        <label className="switch">
+          <input type="checkbox" role="switch" checked={includeMaybe} onChange={(event) => onIncludeMaybe(event.target.checked)} />
+          <span className="track" aria-hidden="true" />
+          <span>List weak guesses (Unity/Unreal installs)</span>
+        </label>
       </div>
+
+      <p className="pending">
+        {pending.add === 0 && pending.remove === 0
+          ? 'Steam already matches your selection.'
+          : `${pending.add} to add · ${pending.remove} to remove`}
+      </p>
 
       <button type="button" className={mode === 'apply' ? 'cta apply' : 'cta'} disabled={disabled || busy} onClick={() => void run()}>
         {busy ? <span className="spinner" aria-hidden="true" /> : <SyncIcon />}

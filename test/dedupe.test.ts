@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dedupeGames, launchKey, normalizeExe, normalizeTitle, type KnownGames } from '../src/dedupe.js';
+import { dedupeGames, gameKey, launchKey, normalizeExe, normalizeTitle, type KnownGames } from '../src/dedupe.js';
 import type { Game } from '../src/types.js';
 
 const game = (title: string, exe = `/games/${title}`, store = 'Epic Games'): Game => ({
@@ -20,6 +20,13 @@ describe('normalizeTitle', () => {
     expect(normalizeTitle('Rock & Roll')).toBe('rockandroll');
     expect(normalizeTitle('Café Ünïcode')).toBe('cafeunicode');
     expect(normalizeTitle('!!!')).toBe('');
+  });
+});
+
+describe('gameKey', () => {
+  it('joins the store and the store-specific id', () => {
+    expect(gameKey({ store: 'Epic Games', id: 'fn' })).toBe('Epic Games:fn');
+    expect(gameKey(game('Hades', '/x', 'GOG Galaxy'))).toBe('GOG Galaxy:Hades');
   });
 });
 

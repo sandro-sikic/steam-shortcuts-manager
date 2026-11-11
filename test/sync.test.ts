@@ -110,4 +110,21 @@ describe('planSync', () => {
     expect(result.removed).toHaveLength(0);
     expect(result.entries).toHaveLength(2);
   });
+
+  it('removes our shortcut for a game the user switched off, even without prune', () => {
+    const off = managed(game({ title: 'Off', exe: '/off' }));
+    const on = managed(game());
+    const foreign = buildShortcut({ title: 'Mine', exe: '/mine', tags: [] });
+    const offId = shortcutAppId(off);
+    const result = planSync([off, foreign, on], [game()], { prune: false, remove: new Set([offId, shortcutAppId(foreign)]) });
+    expect(result.removed.map((r) => r.title)).toEqual(['Off']);
+    expect(result.entries).toEqual([foreign, on]);
+  });
+
+  it('does not remove a shortcut whose game is still wanted, whatever the remove list says', () => {
+    const on = managed(game());
+    const result = planSync([on], [game()], { prune: false, remove: new Set([shortcutAppId(on)]) });
+    expect(result.removed).toEqual([]);
+    expect(result.unchanged).toHaveLength(1);
+  });
 });
