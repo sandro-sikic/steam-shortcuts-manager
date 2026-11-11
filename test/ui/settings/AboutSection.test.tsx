@@ -13,6 +13,8 @@ describe('AboutSection', () => {
     expect(screen.getByText('Loading...')).toBeTruthy();
     expect(await screen.findByText('1.2.3')).toBeTruthy();
     expect(screen.getByText(about.configFile)).toBeTruthy();
+    expect(screen.getByText(about.artworkCache)).toBeTruthy();
+    expect(screen.getByText('Artwork cache')).toBeTruthy();
     expect(screen.getByText(about.steamRoot as string)).toBeTruthy();
     expect(screen.getByText('Available')).toBeTruthy();
   });

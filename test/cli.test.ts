@@ -149,6 +149,14 @@ describe('add', () => {
     expect(logs.some((l) => l.startsWith('Backed up'))).toBe(false);
   });
 
+  it('reports artwork downloads that fail, and still adds the game', async () => {
+    const { run, logs, configDir, ctx } = await setup({ env: { STEAMGRIDDB_API_KEY: 'k' } });
+    ctx.fetchFn = fakeFetch({}); // every request answers 404
+    await run(...add);
+    expect(logs).toContain('  Fortnite (artwork: 0 saved, 0 already present, 0 not found, 5 failed)');
+    expect(await loadShortcuts(configDir)).toHaveLength(1);
+  });
+
   it('defaults the store to "Other" and honors --api-key', async () => {
     const { run, configDir, fetchFn } = await setup();
     await run('add', '--title', 'Fortnite', '--exe', '/e', '--api-key', 'flagkey', '--no-artwork');

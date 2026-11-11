@@ -1,6 +1,6 @@
 import { ARTWORK_KINDS } from '../artwork/kinds.js';
 import { coverHue, initials } from './cover.js';
-import type { ApiKeyStatus, AppInfo, ArtworkItem, ArtworkKind, GameInfo, GamesReport, Lists, ShortcutInfo, SteamManagerApi, SyncItemInfo, SyncReport, SyncRequest } from '../ipc.js';
+import type { ApiKeyStatus, AppInfo, ArtworkEntry, ArtworkItem, ArtworkKind, GameInfo, GamesReport, Lists, ShortcutInfo, SteamManagerApi, SyncItemInfo, SyncReport, SyncRequest } from '../ipc.js';
 import { applySettings, DEFAULT_SETTINGS } from '../settingsModel.js';
 
 interface DemoGame {
@@ -41,8 +41,9 @@ function demoImage(kind: ArtworkKind, title: string): string {
 /**
  * A stand-in for the Electron bridge with in-memory example data, so the UI can be developed in a
  * plain browser (`npm run ui:dev`). It is installed only when the real bridge is missing.
+ * Downloading artwork takes `delayMs` so that progress can be seen.
  */
-export function createDemoBridge(): SteamManagerApi {
+export function createDemoBridge({ delayMs = 350 }: { delayMs?: number } = {}): SteamManagerApi {
   const appIdOf = (game: DemoGame): number => 1000 + DEMO_GAMES.indexOf(game);
   const excluded = new Set<string>();
   /** Images "downloaded" per shortcut ID. */
@@ -50,6 +51,8 @@ export function createDemoBridge(): SteamManagerApi {
     [appIdOf(DEMO_GAMES[0] as DemoGame), { title: 'Fortnite', kinds: new Set(ARTWORK_KINDS) }],
     [appIdOf(DEMO_GAMES[2] as DemoGame), { title: 'Hades', kinds: new Set<ArtworkKind>(['poster', 'hero']) }],
   ]);
+  const pause = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, delayMs));
+  const entryOf = (entry?: { title: string; kinds: Set<ArtworkKind> }): ArtworkEntry => ({ items: entry ? itemsOf(entry) : [], pending: !entry || entry.kinds.size < ARTWORK_KINDS.length });
   const itemsOf = (entry: { title: string; kinds: Set<ArtworkKind> }): ArtworkItem[] =>
     ARTWORK_KINDS.filter((kind) => entry.kinds.has(kind)).map((kind) => ({ kind, url: demoImage(kind, entry.title) }));
   let settings = structuredClone(DEFAULT_SETTINGS);
@@ -126,16 +129,17 @@ export function createDemoBridge(): SteamManagerApi {
       { accountId: '1', name: 'demo_player', mostRecent: true },
       { accountId: '2', name: '', mostRecent: false },
     ],
-    about: async () => ({ version: 'demo', platform: 'demo', configFile: '/demo/steam-manager/config.json', steamRoot: '/demo/Steam', secureStorage: true }),
+    about: async () => ({ version: 'demo', platform: 'demo', configFile: '/demo/steam-manager/config.json', artworkCache: '/demo/steam-manager/artwork-cache', steamRoot: '/demo/Steam', secureStorage: true }),
     openConfigFolder: async () => undefined,
-    artwork: async (appIds) => Object.fromEntries(appIds.flatMap((appId) => (art.has(appId) ? [[appId, itemsOf(art.get(appId) as { title: string; kinds: Set<ArtworkKind> })]] : []))),
+    artwork: async (games) => Object.fromEntries(games.map(({ appId }) => [appId, entryOf(art.get(appId))])),
     downloadArtwork: async ({ appId, title, force }) => {
       if (apiKey === '') throw new Error('Add a SteamGridDB API key in Settings to download artwork.');
+      await pause();
       const entry = art.get(appId) ?? { title, kinds: new Set<ArtworkKind>() };
       const outcomes = ARTWORK_KINDS.map((kind) => ({ kind, status: entry.kinds.has(kind) && !force ? ('exists' as const) : ('saved' as const) }));
       for (const kind of ARTWORK_KINDS) entry.kinds.add(kind);
       art.set(appId, entry);
-      return { outcomes, items: itemsOf(entry) };
+      return { outcomes, ...entryOf(entry) };
     },
     sync: async (request: SyncRequest): Promise<SyncReport> => {
       const games = listed(request.includeMaybe);

@@ -15,7 +15,8 @@ export type FetchLike = (url: string, init?: { headers?: Record<string, string> 
 /** "II" and "2" are the same game; "I", "V" and "X" are left alone because they are often part of a name (Mega Man X). */
 const ROMAN: Record<string, string> = { ii: '2', iii: '3', iv: '4', vi: '6', vii: '7', viii: '8', ix: '9' };
 
-function titleKey(title: string): string {
+/** A title reduced to what identifies the game: case, punctuation, symbols and Roman numerals II to IX ignored. */
+export function titleKey(title: string): string {
   return normalizeTitle(title.replace(/\b(?:ii|iii|iv|vi|vii|viii|ix)\b/gi, (numeral) => ROMAN[numeral.toLowerCase()] as string));
 }
 

@@ -1,4 +1,5 @@
-import { installArtwork, type ArtworkOutcome } from './artwork/install.js';
+import { artworkCacheDir, copyCachedToGrid, fillCache } from './artwork/cache.js';
+import type { ArtworkOutcome } from './artwork/install.js';
 import { SteamGridDbClient, type FetchLike } from './artwork/steamgriddb.js';
 import { configDir, loadConfig } from './config.js';
 import { loadSettings } from './settings.js';
@@ -104,15 +105,19 @@ async function fetchArtwork(
   }
   const client = new SteamGridDbClient(apiKey, ctx.fetchFn);
   const { artwork } = await loadSettings(configDir(ctx.platform, ctx.home, ctx.env));
+  const cacheRoot = artworkCacheDir(configDir(ctx.platform, ctx.home, ctx.env));
   for (const item of items) {
-    const outcomes = await installArtwork({
+    // Everything is downloaded once into the app's cache; Steam's grid folder gets copies.
+    const filled = await fillCache({ cacheRoot, title: item.title, client, fetchFn: ctx.fetchFn, force: options.forceArtwork });
+    const failed = new Map(filled.filter((outcome) => outcome.status === 'failed').map((outcome) => [outcome.kind, outcome.error as string]));
+    const outcomes = await copyCachedToGrid({
+      cacheRoot,
+      title: item.title,
       gridDir: user.gridDir,
       appId: item.appId,
-      title: item.title,
-      client,
-      fetchFn: ctx.fetchFn,
-      force: options.forceArtwork,
       kinds: artwork.kinds,
+      force: options.forceArtwork,
+      failed,
     });
     ctx.log(`  ${item.title} (${summarize(outcomes)})`);
   }

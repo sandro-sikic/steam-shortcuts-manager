@@ -46,7 +46,7 @@ export const accounts: SteamAccountInfo[] = [
   { accountId: '42', name: 'player_one', mostRecent: true },
   { accountId: '7', name: '', mostRecent: false },
 ];
-export const about: AboutInfo = { version: '1.2.3', platform: 'linux', configFile: '/home/me/.config/steam-manager/config.json', steamRoot: '/home/me/.steam/steam', secureStorage: true };
+export const about: AboutInfo = { version: '1.2.3', platform: 'linux', configFile: '/home/me/.config/steam-manager/config.json', artworkCache: '/home/me/.config/steam-manager/artwork-cache', steamRoot: '/home/me/.steam/steam', secureStorage: true };
 
 export type MockApi = { [K in keyof SteamManagerApi]: ReturnType<typeof vi.fn> };
 
@@ -72,7 +72,7 @@ export function installApi(overrides: Partial<MockApi> = {}): MockApi {
     about: vi.fn(async () => about),
     openConfigFolder: vi.fn(async () => undefined),
     artwork: vi.fn(async () => ({})),
-    downloadArtwork: vi.fn(async () => ({ outcomes: [], items: [] })),
+    downloadArtwork: vi.fn(async () => ({ outcomes: [], items: [], pending: false })),
     ...overrides,
   };
   window.steamManager = mock as unknown as SteamManagerApi;

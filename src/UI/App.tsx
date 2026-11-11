@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ArtworkItem, GamesReport, IntegrationInfo, Settings, SettingsPatch, ShortcutInfo, StatusInfo } from '../ipc.js';
+import type { ArtworkEntry, GamesReport, IntegrationInfo, Settings, SettingsPatch, ShortcutInfo, StatusInfo } from '../ipc.js';
 import { DEFAULT_SETTINGS } from '../settingsModel.js';
 import { api, errorMessage } from './api.js';
 import { GamePage } from './GamePage.js';
@@ -18,7 +18,10 @@ export function App() {
   const [report, setReport] = useState<GamesReport>(NO_GAMES);
   /** Set when the user flips the switch in the sync panel; until then the saved setting decides. */
   const [maybeChoice, setMaybeChoice] = useState<boolean>();
-  const [art, setArt] = useState<Record<number, ArtworkItem[]>>({});
+  const [art, setArt] = useState<Record<number, ArtworkEntry>>({});
+  /** Counts how many times the library's artwork has been looked up; each one starts a background download run. */
+  const [artRun, setArtRun] = useState(0);
+  const [artProgress, setArtProgress] = useState<{ done: number; total: number }>();
   const [view, setView] = useState<'library' | 'settings' | 'game'>('library');
   const [openKey, setOpenKey] = useState<string>();
   const [error, setError] = useState<string>();
@@ -36,7 +39,8 @@ export function App() {
       setReport(nextReport);
       const nextShortcuts = nextStatus.error ? [] : await api().shortcuts();
       setShortcuts(nextShortcuts);
-      setArt(await api().artwork([...new Set([...nextReport.games.map((game) => game.appId), ...nextShortcuts.map((shortcut) => shortcut.appId)])]));
+      setArt(await api().artwork([...nextReport.games, ...nextShortcuts].map(({ appId, title }) => ({ appId, title }))));
+      setArtRun((run) => run + 1);
     } catch (failure) {
       setError(errorMessage(failure));
     } finally {
@@ -47,6 +51,38 @@ export function App() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Once the library is ready, download the artwork of every game that has none cached yet, one game at a time.
+  useEffect(() => {
+    if (artRun === 0 || !settings?.artwork.auto) return undefined;
+    const queue = report.games.filter((game) => art[game.appId]?.pending);
+    if (queue.length === 0) return undefined;
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (!(await api().apiKeyStatus()).set) return;
+        for (const [index, game] of queue.entries()) {
+          if (cancelled) return;
+          setArtProgress({ done: index, total: queue.length });
+          try {
+            const result = await api().downloadArtwork({ appId: game.appId, title: game.title, force: false });
+            if (!cancelled) setArt((current) => ({ ...current, [game.appId]: { items: result.items, pending: result.pending } }));
+          } catch {
+            // this game is tried again the next time the library loads
+          }
+        }
+      } catch {
+        // without a key status there is nothing to do
+      } finally {
+        if (!cancelled) setArtProgress(undefined);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      setArtProgress(undefined);
+    };
+    // Only a newly looked-up library starts a run; progress updates to `art` must not restart it.
+  }, [artRun]);
 
   // Theme and card size are applied to the whole page.
   useEffect(() => {
@@ -98,11 +134,11 @@ export function App() {
       {openGame && (
         <GamePage
           game={openGame}
-          items={art[openGame.appId] ?? []}
+          items={art[openGame.appId]?.items ?? []}
           onBack={() => setView('library')}
           onToggle={(include) => void toggle([openGame.key], include)}
           onOpenSettings={() => setView('settings')}
-          onArtworkChanged={(appId, items) => setArt((current) => ({ ...current, [appId]: items }))}
+          onArtworkChanged={(appId, entry) => setArt((current) => ({ ...current, [appId]: entry }))}
         />
       )}
       {error && <p className="callout danger" role="alert">{error}</p>}
@@ -146,6 +182,7 @@ export function App() {
               report={report}
               shortcuts={shortcuts}
               art={art}
+              artProgress={artProgress}
               loading={loading}
               onToggle={(keys, include) => void toggle(keys, include)}
               onOpen={(key) => {

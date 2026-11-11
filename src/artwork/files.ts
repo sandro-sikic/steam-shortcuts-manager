@@ -16,6 +16,11 @@ const MIME: Record<string, string> = {
   ico: 'image/x-icon',
 };
 
+/** The content type for a file extension, with or without the dot. */
+export function mimeOf(extension: string): string {
+  return MIME[extension.replace(/^\./, '').toLowerCase()] as string;
+}
+
 const KIND_BY_SUFFIX = new Map(ARTWORK_KINDS.map((kind) => [ARTWORK_SUFFIXES[kind], kind]));
 
 export interface ArtworkFile {
@@ -50,6 +55,11 @@ export function artworkUrl(file: string, version: number): string {
   return `${ARTWORK_SCHEME}://grid/${file}?v=${version}`;
 }
 
+/** The URL of an image in the app's own artwork cache. */
+export function cacheArtworkUrl(key: string, file: string, version: number): string {
+  return `${ARTWORK_SCHEME}://cache/${encodeURIComponent(key)}/${file}?v=${version}`;
+}
+
 export type ArtworkResponse = { status: 200; contentType: string; data: Buffer } | { status: 400 | 404 };
 
 /** Reads one grid image by file name. Only names that look like grid images are accepted (no paths). */
@@ -57,7 +67,7 @@ export async function readArtworkFile(gridDir: string, name: string): Promise<Ar
   if (!parseArtworkFile(name)) return { status: 400 };
   try {
     const data = await readFile(path.join(gridDir, name));
-    return { status: 200, contentType: MIME[path.extname(name).slice(1).toLowerCase()] as string, data };
+    return { status: 200, contentType: mimeOf(path.extname(name)), data };
   } catch {
     return { status: 404 };
   }

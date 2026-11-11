@@ -16,8 +16,10 @@ export interface Settings {
     allowRunning: boolean;
   };
   artwork: {
-    /** Which images to download. */
+    /** Which images to copy into Steam's grid folder on sync. */
     kinds: ArtworkKind[];
+    /** Download artwork for every game in the library in the background, into the app's own cache. */
+    auto: boolean;
   };
   /** Defaults for the sync panel. */
   sync: {
@@ -40,7 +42,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   steam: { dir: '', user: '', allowRunning: false },
-  artwork: { kinds: [...ARTWORK_KINDS] },
+  artwork: { kinds: [...ARTWORK_KINDS], auto: true },
   sync: { mode: 'preview', prune: false, includeMaybe: false, artwork: true, autoApply: false },
   launchers: { disabled: [] },
   ui: { theme: 'system', cardSize: 'medium' },
@@ -85,7 +87,7 @@ const FIELDS: { [S in keyof Settings]: { [K in keyof Settings[S]]: Field } } = {
     },
     allowRunning: flag,
   },
-  artwork: { kinds: list(ARTWORK_KINDS) },
+  artwork: { kinds: list(ARTWORK_KINDS), auto: flag },
   sync: { mode: choice(['preview', 'apply']), prune: flag, includeMaybe: flag, artwork: flag, autoApply: flag },
   launchers: { disabled: list() },
   ui: { theme: choice(['system', 'light', 'dark']), cardSize: choice(['small', 'medium', 'large']) },

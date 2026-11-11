@@ -65,6 +65,12 @@ describe('GamePage', () => {
     expect((screen.getByRole('switch', { name: 'Add to Steam' }) as HTMLInputElement).checked).toBe(false);
   });
 
+  it('says where the images are kept', () => {
+    installApi(hasKey);
+    renderPage();
+    expect(screen.getByText(/kept in this app’s own cache/)).toBeTruthy();
+  });
+
   it('shows every image with its name and size', () => {
     installApi(hasKey);
     renderPage({ items: all });
@@ -121,24 +127,25 @@ describe('GamePage downloading', () => {
         { kind: 'icon' as const, status: 'saved' as const },
       ],
       items: all,
+      pending: false,
     }));
     const mock = installApi({ ...hasKey, downloadArtwork });
     const { onArtworkChanged } = renderPage();
     await waitFor(() => expect((screen.getByRole('button', { name: 'Download artwork' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Download artwork' }));
 
-    expect((await screen.findByRole('status')).textContent).toBe('3 downloaded, 1 already there, 1 not on SteamGridDB, 0 failed.');
+    expect((await screen.findByRole('status')).textContent).toBe('3 downloaded, 1 already cached, 1 not on SteamGridDB, 0 failed.');
     expect(mock.downloadArtwork).toHaveBeenCalledWith({ appId: 1, title: 'Fortnite', force: false });
-    expect(onArtworkChanged).toHaveBeenCalledWith(1, all);
+    expect(onArtworkChanged).toHaveBeenCalledWith(1, { items: all, pending: false });
   });
 
   it('downloads again on request, and says why an image failed', async () => {
-    const downloadArtwork = vi.fn(async () => ({ outcomes: [{ kind: 'poster' as const, status: 'failed' as const, error: 'Download failed with HTTP 404' }], items: [] }));
+    const downloadArtwork = vi.fn(async () => ({ outcomes: [{ kind: 'poster' as const, status: 'failed' as const, error: 'Download failed with HTTP 404' }], items: [], pending: true }));
     const mock = installApi({ ...hasKey, downloadArtwork });
     renderPage({ items: [item('poster')] });
     await waitFor(() => expect((screen.getByRole('button', { name: 'Download again' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Download again' }));
-    expect((await screen.findByRole('status')).textContent).toBe('0 downloaded, 0 already there, 0 not on SteamGridDB, 1 failed. Download failed with HTTP 404');
+    expect((await screen.findByRole('status')).textContent).toBe('0 downloaded, 0 already cached, 0 not on SteamGridDB, 1 failed. Download failed with HTTP 404');
     expect(mock.downloadArtwork).toHaveBeenCalledWith({ appId: 1, title: 'Fortnite', force: true });
   });
 
@@ -160,13 +167,13 @@ describe('GamePage downloading', () => {
   });
 
   it('disables the buttons while downloading', async () => {
-    let finish: (value: { outcomes: []; items: [] }) => void = () => undefined;
+    let finish: (value: { outcomes: []; items: []; pending: boolean }) => void = () => undefined;
     installApi({ ...hasKey, downloadArtwork: vi.fn(() => new Promise((resolve) => { finish = resolve; })) });
     renderPage();
     await waitFor(() => expect((screen.getByRole('button', { name: 'Download artwork' }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole('button', { name: 'Download artwork' }));
     expect((await screen.findByRole('button', { name: 'Downloading…' }) as HTMLButtonElement).disabled).toBe(true);
-    finish({ outcomes: [], items: [] });
+    finish({ outcomes: [], items: [], pending: false });
     await screen.findByRole('button', { name: 'Download artwork' });
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { ArtworkItem, ArtworkKind, ArtworkResult, GameInfo } from '../ipc.js';
+import type { ArtworkEntry, ArtworkItem, ArtworkKind, ArtworkResult, GameInfo } from '../ipc.js';
 import { api, errorMessage } from './api.js';
 import { stateOf } from './gameState.js';
 import { ArrowLeftIcon } from './icons.js';
@@ -34,7 +34,7 @@ function summary(outcomes: ArtworkResult['outcomes']): { text: string; error?: s
   const count = (status: ArtworkResult['outcomes'][number]['status']): number => outcomes.filter((outcome) => outcome.status === status).length;
   const failed = outcomes.find((outcome) => outcome.status === 'failed');
   return {
-    text: `${count('saved')} downloaded, ${count('exists')} already there, ${count('missing')} not on SteamGridDB, ${count('failed')} failed.`,
+    text: `${count('saved')} downloaded, ${count('exists')} already cached, ${count('missing')} not on SteamGridDB, ${count('failed')} failed.`,
     error: failed?.error,
   };
 }
@@ -53,7 +53,7 @@ export function GamePage({
   /** Ticks the game on or off for Steam. */
   onToggle: (include: boolean) => void;
   onOpenSettings: () => void;
-  onArtworkChanged: (appId: number, items: ArtworkItem[]) => void;
+  onArtworkChanged: (appId: number, entry: ArtworkEntry) => void;
 }) {
   const [hasKey, setHasKey] = useState<boolean>();
   const [busy, setBusy] = useState(false);
@@ -75,7 +75,7 @@ export function GamePage({
     try {
       const downloaded = await api().downloadArtwork({ appId: game.appId, title: game.title, force });
       setResult(summary(downloaded.outcomes));
-      onArtworkChanged(game.appId, downloaded.items);
+      onArtworkChanged(game.appId, { items: downloaded.items, pending: downloaded.pending });
     } catch (error) {
       setFailure(errorMessage(error));
     } finally {
@@ -121,6 +121,8 @@ export function GamePage({
             )}
           </div>
         </div>
+
+        <p className="help">Images are kept in this app’s own cache and copied into Steam’s grid folder when the game is synced.</p>
 
         {hasKey === false && (
           <div className="callout warn" role="status">

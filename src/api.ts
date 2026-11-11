@@ -2,15 +2,15 @@ import os from 'node:os';
 import { configDir, configFile, loadConfig, updateConfig } from './config.js';
 import { mkdir } from 'node:fs/promises';
 import { ARTWORK_KINDS } from './artwork/kinds.js';
-import { artworkUrl, ARTWORK_SCHEME, listArtwork, readArtworkFile, type ArtworkResponse } from './artwork/files.js';
-import { installArtwork } from './artwork/install.js';
+import { artworkCacheDir, fillCache, isPending, readCache, readCachedArtwork } from './artwork/cache.js';
+import { artworkUrl, ARTWORK_SCHEME, cacheArtworkUrl, listArtwork, readArtworkFile, type ArtworkResponse } from './artwork/files.js';
 import { SteamGridDbClient } from './artwork/steamgriddb.js';
 import { loadSettings, resetSettings, updateSettings } from './settings.js';
 import { SECURE_STORAGE_UNAVAILABLE, type SecretStore } from './secrets.js';
 import { openUser, resolveGames, runSync, scanApps, scanIntegrations, knownGames, type AppContext } from './app.js';
 import { dedupeGames, gameKey, type KnownGames } from './dedupe.js';
 import { availableIntegrations, integrations } from './integrations/index.js';
-import type { AboutInfo, ApiKeyStatus, ApiKeyTest, AppInfo, ArtworkItem, ArtworkRequest, ArtworkResult, GamesReport, GamesRequest, IntegrationInfo, Lists, Settings, SettingsPatch, ShortcutInfo, SteamAccountInfo, SteamManagerApi, StatusInfo, SyncReport, SyncRequest } from './ipc.js';
+import type { AboutInfo, ApiKeyStatus, ApiKeyTest, AppInfo, ArtworkEntry, ArtworkGame, ArtworkItem, ArtworkRequest, ArtworkResult, GamesReport, GamesRequest, IntegrationInfo, Lists, Settings, SettingsPatch, ShortcutInfo, SteamAccountInfo, SteamManagerApi, StatusInfo, SyncReport, SyncRequest } from './ipc.js';
 import { findSteamRoot, listAccounts } from './steam/locate.js';
 import { defaultRunner, isSteamRunning } from './steam/running.js';
 import { computeAppId, isManaged, MANAGED_TAG, quote, shortcutAppId, shortcutTags, shortcutTitle } from './steam/shortcuts.js';
@@ -75,22 +75,29 @@ export function parseArtworkRequest(value: unknown): ArtworkRequest {
 }
 
 /**
- * Answers requests for `steam-manager-art://grid/<file>` with the image from Steam's grid folder.
- * Used by the desktop app so the page can show images without any file access.
+ * Answers requests for `steam-manager-art://grid/<file>` (Steam's grid folder) and
+ * `steam-manager-art://cache/<game>/<file>` (the app's artwork cache). Used by the desktop app so the
+ * page can show images without any file access.
  */
 export function createArtworkServer(deps: ApiDeps): (url: string) => Promise<ArtworkResponse> {
   return async (url) => {
-    let name: string;
+    let host: string;
+    let parts: string[];
     try {
       const parsed = new URL(url);
-      if (parsed.protocol !== `${ARTWORK_SCHEME}:` || parsed.hostname !== 'grid') return { status: 400 };
-      name = decodeURIComponent(parsed.pathname.slice(1));
+      if (parsed.protocol !== `${ARTWORK_SCHEME}:`) return { status: 400 };
+      host = parsed.hostname;
+      parts = parsed.pathname.split('/').slice(1).map(decodeURIComponent);
     } catch {
       return { status: 400 };
     }
+    if (host === 'cache' && parts.length === 2) {
+      return readCachedArtwork(artworkCacheDir(configDir(deps.platform, deps.home, deps.env)), parts[0] as string, parts[1] as string);
+    }
+    if (host !== 'grid' || parts.length !== 1) return { status: 400 };
     try {
       const { gridDir } = await openUser({ ...deps, log: console.debug }, {});
-      return await readArtworkFile(gridDir, name);
+      return await readArtworkFile(gridDir, parts[0] as string);
     } catch {
       return { status: 404 };
     }
@@ -108,20 +115,25 @@ export function createApi(deps: ApiDeps): SteamManagerApi {
     return (await deps.secrets?.get(API_KEY)) || deps.env['STEAMGRIDDB_API_KEY'] || undefined;
   }
 
-  /** The images in Steam's grid folder for these shortcuts; none if Steam cannot be found. */
-  async function artwork(appIds: number[]): Promise<Record<number, ArtworkItem[]>> {
-    if (!Array.isArray(appIds) || appIds.some((id) => !Number.isInteger(id))) throw new Error('Invalid app IDs');
-    let gridDir: string;
+  /** What each game has: the image in Steam's grid folder if there is one, else the app's cached copy. */
+  async function artwork(games: ArtworkGame[]): Promise<Record<number, ArtworkEntry>> {
+    if (!Array.isArray(games) || games.some((game) => !Number.isInteger(game?.appId) || typeof game.title !== 'string')) throw new Error('Invalid games');
+    let grid: Awaited<ReturnType<typeof listArtwork>> = [];
     try {
-      gridDir = (await openUser(context(), {})).gridDir;
+      grid = await listArtwork((await openUser(context(), {})).gridDir, new Set(games.map((game) => game.appId)));
     } catch {
-      return {};
+      // without Steam there is only the cache
     }
-    const found: Record<number, ArtworkItem[]> = {};
-    for (const file of await listArtwork(gridDir, new Set(appIds))) {
-      (found[file.appId] ??= []).push({ kind: file.kind, url: artworkUrl(file.file, file.version) });
+    const cacheRoot = artworkCacheDir(dir());
+    const now = Date.now();
+    const found: Record<number, ArtworkEntry> = {};
+    for (const { appId, title } of games) {
+      const items = new Map<ArtworkItem['kind'], ArtworkItem>();
+      const cached = await readCache(cacheRoot, title);
+      for (const [kind, { file, version }] of cached?.files ?? []) items.set(kind, { kind, url: cacheArtworkUrl(cached?.key as string, file, version) });
+      for (const file of grid.filter((candidate) => candidate.appId === appId)) items.set(file.kind, { kind: file.kind, url: artworkUrl(file.file, file.version) });
+      found[appId] = { items: ARTWORK_KINDS.filter((kind) => items.has(kind)).map((kind) => items.get(kind) as ArtworkItem), pending: isPending(cached, now) };
     }
-    for (const items of Object.values(found)) items.sort((a, b) => ARTWORK_KINDS.indexOf(a.kind) - ARTWORK_KINDS.indexOf(b.kind));
     return found;
   }
 
@@ -277,6 +289,7 @@ export function createApi(deps: ApiDeps): SteamManagerApi {
         version: deps.version ?? 'dev',
         platform: deps.platform,
         configFile: configFile(dir()),
+        artworkCache: artworkCacheDir(dir()),
         secureStorage: (await deps.secrets?.available()) === true,
       };
       try {
@@ -298,12 +311,9 @@ export function createApi(deps: ApiDeps): SteamManagerApi {
       const { appId, title, force } = parseArtworkRequest(request);
       const key = await apiKey();
       if (!key) throw new Error('Add a SteamGridDB API key in Settings to download artwork.');
-      const { gridDir } = await openUser(context(), {});
-      const outcomes = await installArtwork({ gridDir, appId, title, client: new SteamGridDbClient(key, deps.fetchFn), fetchFn: deps.fetchFn, force });
-      return {
-        outcomes: outcomes.map(({ kind, status, error }) => ({ kind, status, error })),
-        items: (await artwork([appId]))[appId] ?? [],
-      };
+      const outcomes = await fillCache({ cacheRoot: artworkCacheDir(dir()), title, client: new SteamGridDbClient(key, deps.fetchFn), fetchFn: deps.fetchFn, force });
+      const { items, pending } = (await artwork([{ appId, title }]))[appId] as ArtworkEntry;
+      return { outcomes: outcomes.map(({ kind, status, error }) => ({ kind, status, error })), items, pending };
     },
 
     async sync(request: SyncRequest): Promise<SyncReport> {

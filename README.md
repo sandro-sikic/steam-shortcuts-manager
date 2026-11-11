@@ -89,17 +89,28 @@ Unchecking saves the game's key (`store:id`) to the `exclude` list in `config.js
 ## Game pages and artwork
 
 Tap a game card in the library to open its page: title, a back button, the store and what Apply will do, an
-"Add to Steam" switch, and every image downloaded for the game (hero, poster, wide capsule, logo, icon) with a
+"Add to Steam" switch, and every image the game has (hero, poster, wide capsule, logo, icon) with a
 "Not downloaded" placeholder for any that are missing. The checkbox in a card's corner still ticks the game on or off
 without opening it.
 
-- Images are the ones in Steam's grid folder (`userdata/<id>/config/grid`, named by the game's shortcut ID). Sync downloads
-  them for added games when artwork is on and a key is set; the game page's **Download artwork** (and **Download again**)
-  fetches all five kinds for that one game, even before it is added to Steam.
-- The library shows a game's real poster when one exists, and the generated cover otherwise (also if an image fails to load).
-  Without a SteamGridDB key nothing is downloaded, so cards keep their placeholders until the key is set in Settings.
-- The page never touches files: the desktop app serves grid images from a `steam-manager-art://grid/<file>` scheme that only
-  accepts grid file names (no paths) and the page's security policy allows images from it and nothing else.
+**The app keeps its own copy of the artwork.** Once the library is ready, and a SteamGridDB key is set, the app downloads
+the images of every game that has none cached yet, one game at a time, with a progress line in the library; posters appear
+on the cards as they arrive. Quit at any point and it resumes next time, fetching only what is missing.
+
+- **Where:** `<config folder>/artwork-cache/<title>-<hash>/` (shown in Settings > About), one folder per game keyed by its
+  title, so the same game from two launchers shares its art. Each folder holds `poster`, `wide`, `hero`, `logo` and `icon`
+  images plus a small `meta.json`. Expect roughly 5 MB per game.
+- **What is not asked twice:** an image SteamGridDB does not have is remembered (as "missing") for a week before it is asked for
+  again, so an obscure game does not cost a request on every launch. Failed downloads are not remembered and are retried.
+- **Matching:** a game is matched on SteamGridDB by exact title (ignoring case, punctuation, symbols and Roman numerals II to IX).
+  Its search is fuzzy, so a near miss would show another game's art; no exact match means placeholders.
+- **Sync copies from the cache** into Steam's grid folder (`userdata/<id>/config/grid`, named by the shortcut ID), so adding a
+  game needs no second download. An image already in Steam's folder is kept; the library and game page prefer it over the cache.
+- **Controls:** Settings > Artwork can turn the automatic download off, and chooses which images are copied into Steam.
+  The game page's **Download artwork** and **Download again** fetch one game on demand.
+- **The page never touches files:** the desktop app serves images through a `steam-manager-art://` scheme
+  (`grid/<file>` for Steam's folder, `cache/<game>/<file>` for the cache) that only accepts image names, no paths, and the page's
+  security policy allows images from it and nothing else.
 - Only the single top-rated image per kind is downloaded. Browsing other SteamGridDB alternatives is not built yet.
 
 ## Settings
@@ -108,7 +119,7 @@ The gear in the header opens the settings page. Changes save as you make them.
 
 | Section | What it controls |
 |---|---|
-| Artwork | the SteamGridDB API key (with a Test button), which images to download, and whether sync downloads artwork |
+| Artwork | the SteamGridDB API key (with a Test button), automatic artwork download, which images are copied into Steam, and whether sync copies artwork |
 | Steam | the Steam folder (empty = auto-detect), the account, and whether changes may be written while Steam is running |
 | Sync | the sync panel's starting choices (Preview or Apply, remove games that are gone, weak guesses) and **auto-apply**, which applies to Steam as soon as you tick or untick a game |
 | Launchers | turn individual launchers on or off |

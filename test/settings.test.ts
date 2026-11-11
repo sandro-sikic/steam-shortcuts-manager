@@ -12,7 +12,7 @@ describe('defaults', () => {
   it('are safe: preview first, nothing removed, auto-detect Steam, all artwork, system theme', () => {
     expect(DEFAULT_SETTINGS).toEqual({
       steam: { dir: '', user: '', allowRunning: false },
-      artwork: { kinds: ['poster', 'wide', 'hero', 'logo', 'icon'] },
+      artwork: { kinds: ['poster', 'wide', 'hero', 'logo', 'icon'], auto: true },
       sync: { mode: 'preview', prune: false, includeMaybe: false, artwork: true, autoApply: false },
       launchers: { disabled: [] },
       ui: { theme: 'system', cardSize: 'medium' },
@@ -34,13 +34,13 @@ describe('applySettings', () => {
   it('accepts valid values of every kind', () => {
     const next = applySettings(DEFAULT_SETTINGS, {
       steam: { dir: '  /games/Steam ', user: '12345', allowRunning: true },
-      artwork: { kinds: ['hero', 'poster', 'hero'] },
+      artwork: { kinds: ['hero', 'poster', 'hero'], auto: false },
       sync: { prune: true, includeMaybe: true, artwork: false, autoApply: true },
       launchers: { disabled: ['riot', 'riot', 'ea'] },
       ui: { cardSize: 'large' },
     });
     expect(next.steam).toEqual({ dir: '/games/Steam', user: '12345', allowRunning: true });
-    expect(next.artwork.kinds).toEqual(['hero', 'poster']);
+    expect(next.artwork).toEqual({ kinds: ['hero', 'poster'], auto: false });
     expect(next.launchers.disabled).toEqual(['riot', 'ea']);
     expect(next.sync).toMatchObject({ prune: true, includeMaybe: true, artwork: false, autoApply: true });
     expect(applySettings(DEFAULT_SETTINGS, { steam: { user: '' } }).steam.user).toBe('');
@@ -52,6 +52,7 @@ describe('applySettings', () => {
     [{ steam: { user: 'abc' } }, 'steam.user must be a number'],
     [{ steam: { user: 7 } }, 'steam.user must be text'],
     [{ steam: { allowRunning: 'yes' } }, 'steam.allowRunning must be true or false'],
+    [{ artwork: { auto: 'yes' } }, 'artwork.auto must be true or false'],
     [{ sync: { mode: 'later' } }, 'sync.mode must be one of: preview, apply'],
     [{ sync: { mode: 3 } }, 'sync.mode must be one of'],
     [{ ui: { theme: 'neon' } }, 'ui.theme must be one of: system, light, dark'],

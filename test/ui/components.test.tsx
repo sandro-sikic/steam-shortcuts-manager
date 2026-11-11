@@ -140,11 +140,11 @@ describe('Library', () => {
   });
 
   describe('posters', () => {
-    const poster = (url: string) => [{ kind: 'poster' as const, url }];
+    const poster = (url: string) => ({ items: [{ kind: 'poster' as const, url }], pending: false });
     const imageOf = (name: string) => (screen.getByText(name).closest('li') as HTMLElement).querySelector('img');
 
     it('shows the downloaded poster of a game, and the generated cover for games without one', () => {
-      renderLibrary({ art: { 1: [...poster('steam-manager-art://grid/1p.png?v=1'), { kind: 'hero', url: 'x://hero' }], 5: [{ kind: 'hero', url: 'x://only-hero' }] } });
+      renderLibrary({ art: { 1: { items: [...poster('steam-manager-art://grid/1p.png?v=1').items, { kind: 'hero', url: 'x://hero' }], pending: false }, 5: { items: [{ kind: 'hero', url: 'x://only-hero' }], pending: false } } });
       expect(imageOf('Fortnite')?.getAttribute('src')).toBe('steam-manager-art://grid/1p.png?v=1');
       expect(imageOf('Fortnite')?.getAttribute('loading')).toBe('lazy');
       expect(imageOf('Rocket League')).toBeNull();
@@ -166,6 +166,23 @@ describe('Library', () => {
       expect(screen.getAllByText('F').length).toBeGreaterThan(0);
       rerender(<Library {...props} art={{ 1: poster('x://fixed') }} />);
       expect(imageOf('Fortnite')?.getAttribute('src')).toBe('x://fixed');
+    });
+  });
+
+  describe('artwork download progress', () => {
+    it('shows which game is being downloaded and how far along it is', () => {
+      renderLibrary({ artProgress: { done: 2, total: 5 } });
+      expect(screen.getByRole('status').textContent).toContain('Downloading artwork: 3 of 5');
+      const bar = screen.getByLabelText('Artwork download progress') as HTMLProgressElement;
+      expect([bar.value, bar.max]).toEqual([2, 5]);
+    });
+
+    it('never counts past the total, and shows nothing when no download is running', () => {
+      renderLibrary({ artProgress: { done: 5, total: 5 } });
+      expect(screen.getByRole('status').textContent).toContain('5 of 5');
+      cleanup();
+      renderLibrary();
+      expect(screen.queryByLabelText('Artwork download progress')).toBeNull();
     });
   });
 

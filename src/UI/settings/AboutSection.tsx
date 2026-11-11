@@ -57,6 +57,10 @@ export function AboutSection({ onReset }: { onReset: () => Promise<void> }) {
           <dd>{info.version}</dd>
           <dt>Platform</dt>
           <dd>{info.platform}</dd>
+          <dt>Artwork cache</dt>
+          <dd>
+            <code style={{ overflowWrap: 'anywhere' }}>{info.artworkCache}</code>
+          </dd>
           <dt>Config file</dt>
           <dd>
             <code style={{ overflowWrap: 'anywhere' }}>{info.configFile}</code>

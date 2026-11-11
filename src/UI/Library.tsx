@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { ArtworkItem, DuplicateInfo, GameInfo, GamesReport, ShortcutInfo } from '../ipc.js';
+import type { ArtworkEntry, DuplicateInfo, GameInfo, GamesReport, ShortcutInfo } from '../ipc.js';
 import { Check } from './Check.js';
 import { coverHue, initials } from './cover.js';
 import { stateOf } from './gameState.js';
@@ -86,19 +86,22 @@ export function Library({
   report,
   shortcuts,
   art,
+  artProgress,
   loading,
   onToggle,
   onOpen,
 }: {
   report: GamesReport;
   shortcuts: ShortcutInfo[];
-  /** The downloaded images by shortcut ID. */
-  art: Record<number, ArtworkItem[]>;
+  /** The images each game has, by shortcut ID. */
+  art: Record<number, ArtworkEntry>;
+  /** Set while artwork is being downloaded in the background. */
+  artProgress?: { done: number; total: number };
   loading: boolean;
   onToggle: (keys: string[], include: boolean) => void;
   onOpen: (key: string) => void;
 }) {
-  const posterOf = (appId: number): string | undefined => art[appId]?.find((item) => item.kind === 'poster')?.url;
+  const posterOf = (appId: number): string | undefined => art[appId]?.items.find((item) => item.kind === 'poster')?.url;
   const [query, setQuery] = useState('');
   const needle = query.trim().toLowerCase();
   const matches = (title: string): boolean => title.toLowerCase().includes(needle);
@@ -191,6 +194,14 @@ export function Library({
           <input type="search" placeholder="Search games" aria-label="Search games" value={query} onChange={(event) => setQuery(event.target.value)} />
         </label>
       </div>
+      {artProgress && (
+        <div className="art-progress" role="status">
+          <span>
+            Downloading artwork: {Math.min(artProgress.done + 1, artProgress.total)} of {artProgress.total}
+          </span>
+          <progress max={artProgress.total} value={artProgress.done} aria-label="Artwork download progress" />
+        </div>
+      )}
       {!loading && visible.length > 0 && (
         <div className="toolbar">
           <label className="select-all">

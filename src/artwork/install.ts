@@ -24,6 +24,8 @@ export interface InstallArtworkOptions {
   force?: boolean;
   /** Which kinds to download; all when omitted. */
   kinds?: readonly ArtworkKind[];
+  /** Names a downloaded file; by default Steam's grid naming (`<appId>p.png`). */
+  fileName?: (kind: ArtworkKind, ext: string) => string;
 }
 
 function extensionOf(url: string): string {
@@ -46,6 +48,7 @@ async function exists(file: string): Promise<boolean> {
  */
 export async function installArtwork(options: InstallArtworkOptions): Promise<ArtworkOutcome[]> {
   const { gridDir, appId, title, client, fetchFn, force = false, kinds = ARTWORK_KINDS } = options;
+  const fileName = options.fileName ?? ((kind: ArtworkKind, ext: string) => `${appId}${SUFFIXES[kind]}${ext}`);
   let gameId: number | undefined;
   try {
     gameId = await client.searchGame(title);
@@ -56,26 +59,21 @@ export async function installArtwork(options: InstallArtworkOptions): Promise<Ar
   if (gameId === undefined) return kinds.map((kind) => ({ kind, status: 'missing' }));
 
   await mkdir(gridDir, { recursive: true });
-  const outcomes: ArtworkOutcome[] = [];
-  for (const kind of kinds) {
-    try {
-      const url = await client.findArtworkUrl(gameId, kind);
-      if (url === undefined) {
-        outcomes.push({ kind, status: 'missing' });
-        continue;
+  // The kinds are independent, so look them up and download them side by side.
+  return Promise.all(
+    kinds.map(async (kind): Promise<ArtworkOutcome> => {
+      try {
+        const url = await client.findArtworkUrl(gameId, kind);
+        if (url === undefined) return { kind, status: 'missing' };
+        const file = path.join(gridDir, fileName(kind, extensionOf(url)));
+        if (!force && (await exists(file))) return { kind, status: 'exists', file };
+        const response = await fetchFn(url);
+        if (!response.ok) throw new Error(`Download failed with HTTP ${response.status}`);
+        await writeFile(file, Buffer.from(await response.arrayBuffer()));
+        return { kind, status: 'saved', file };
+      } catch (error) {
+        return { kind, status: 'failed', error: (error as Error).message };
       }
-      const file = path.join(gridDir, `${appId}${SUFFIXES[kind]}${extensionOf(url)}`);
-      if (!force && (await exists(file))) {
-        outcomes.push({ kind, status: 'exists', file });
-        continue;
-      }
-      const response = await fetchFn(url);
-      if (!response.ok) throw new Error(`Download failed with HTTP ${response.status}`);
-      await writeFile(file, Buffer.from(await response.arrayBuffer()));
-      outcomes.push({ kind, status: 'saved', file });
-    } catch (error) {
-      outcomes.push({ kind, status: 'failed', error: (error as Error).message });
-    }
-  }
-  return outcomes;
+    }),
+  );
 }

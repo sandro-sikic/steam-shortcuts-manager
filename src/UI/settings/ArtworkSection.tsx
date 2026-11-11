@@ -73,6 +73,11 @@ export function ArtworkSection({ settings, update }: SectionProps) {
     update({ artwork: { kinds } }).catch((error: unknown) => setSaveError(errorMessage(error)));
   };
 
+  const toggleAuto = (next: boolean) => {
+    setSaveError(undefined);
+    update({ artwork: { auto: next } }).catch((error: unknown) => setSaveError(errorMessage(error)));
+  };
+
   const toggleSync = (next: boolean) => {
     setSaveError(undefined);
     update({ sync: { artwork: next } }).catch((error: unknown) => setSaveError(errorMessage(error)));
@@ -130,18 +135,22 @@ export function ArtworkSection({ settings, update }: SectionProps) {
       </div>
 
       <fieldset className="field">
-        <legend>Images to download</legend>
+        <legend>Images to copy into Steam</legend>
         {ARTWORK_KINDS.map((kind) => (
           <label key={kind} className="check-row">
             <Check checked={settings.artwork.kinds.includes(kind)} onChange={(next) => toggleKind(kind, next)} />
             <span>{KIND_LABELS[kind]}</span>
           </label>
         ))}
-        {settings.artwork.kinds.length === 0 && <p className="help">No images will be downloaded.</p>}
+        {settings.artwork.kinds.length === 0 && <p className="help">No images will be copied into Steam.</p>}
       </fieldset>
 
+      <Switch checked={settings.artwork.auto} onChange={toggleAuto}>
+        Download artwork for my games automatically
+      </Switch>
+      <p className="help">When the library is ready, the app downloads the images of every game it finds into its own cache.</p>
       <Switch checked={settings.sync.artwork} onChange={toggleSync}>
-        Download artwork when syncing
+        Copy artwork into Steam when syncing
       </Switch>
       {saveError && (
         <p className="status error" role="alert">

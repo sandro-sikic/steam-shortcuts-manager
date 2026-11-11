@@ -1364,3 +1364,41 @@ fieldset.field legend {
   justify-self: start;
   margin-top: 6px;
 }
+
+/* ---- Artwork download progress ---- */
+
+.art-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.art-progress progress {
+  flex: 0 1 220px;
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--line);
+}
+
+.art-progress progress::-webkit-progress-bar {
+  background: var(--line);
+}
+
+.art-progress progress::-webkit-progress-value {
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+
+.art-progress progress::-moz-progress-bar {
+  background: var(--accent);
+  border-radius: 999px;
+}

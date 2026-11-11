@@ -110,7 +110,7 @@ describe('ArtworkSection images', () => {
     expect(update).toHaveBeenCalledWith({ artwork: { kinds: [] } });
     cleanup();
     render(<ArtworkSection settings={withKinds([])} update={vi.fn()} />);
-    expect(screen.getByText('No images will be downloaded.')).toBeTruthy();
+    expect(screen.getByText('No images will be copied into Steam.')).toBeTruthy();
   });
 
   it('shows a failed kinds save', async () => {
@@ -122,10 +122,22 @@ describe('ArtworkSection images', () => {
   it('toggles syncing artwork and shows a failure', async () => {
     const update = vi.fn(async (_patch: SettingsPatch) => undefined).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("sync failed"));
     await setup({ update });
-    const sw = screen.getByRole('switch', { name: 'Download artwork when syncing' });
+    const sw = screen.getByRole('switch', { name: 'Copy artwork into Steam when syncing' });
     fireEvent.click(sw);
     expect(update).toHaveBeenCalledWith({ sync: { artwork: false } });
     fireEvent.click(sw);
     expect((await screen.findByRole('alert')).textContent).toBe('sync failed');
+  });
+
+  it('toggles the automatic download of artwork and shows a failure', async () => {
+    const update = vi.fn(async (_patch: SettingsPatch) => undefined).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('auto failed'));
+    await setup({ update });
+    const sw = screen.getByRole('switch', { name: 'Download artwork for my games automatically' }) as HTMLInputElement;
+    expect(sw.checked).toBe(true);
+    expect(screen.getByText(/downloads the images of every game it finds into its own cache/)).toBeTruthy();
+    fireEvent.click(sw);
+    expect(update).toHaveBeenCalledWith({ artwork: { auto: false } });
+    fireEvent.click(sw);
+    expect((await screen.findByRole('alert')).textContent).toBe('auto failed');
   });
 });

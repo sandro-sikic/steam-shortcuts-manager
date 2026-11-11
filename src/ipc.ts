@@ -142,6 +142,8 @@ export interface AboutInfo {
   platform: string;
   /** The config file that holds settings and game choices. */
   configFile: string;
+  /** The folder with the app's own copy of every game's artwork. */
+  artworkCache: string;
   steamRoot?: string;
   secureStorage: boolean;
 }
@@ -150,6 +152,20 @@ export interface AboutInfo {
 export interface ArtworkItem {
   kind: ArtworkKind;
   url: string;
+}
+
+/** A game to look up artwork for. */
+export interface ArtworkGame {
+  /** The Steam shortcut ID (see `GameInfo.appId`). */
+  appId: number;
+  title: string;
+}
+
+/** The images a game has: what is in Steam's grid folder, else what the app has cached. */
+export interface ArtworkEntry {
+  items: ArtworkItem[];
+  /** Something is neither cached nor known to be missing, so the background download still has work to do. */
+  pending: boolean;
 }
 
 export interface ArtworkRequest {
@@ -165,6 +181,7 @@ export interface ArtworkResult {
   outcomes: { kind: ArtworkKind; status: 'saved' | 'exists' | 'missing' | 'failed'; error?: string }[];
   /** All images the game has now. */
   items: ArtworkItem[];
+  pending: boolean;
 }
 
 export interface SteamManagerApi {
@@ -193,9 +210,9 @@ export interface SteamManagerApi {
   steamAccounts(): Promise<SteamAccountInfo[]>;
   about(): Promise<AboutInfo>;
   openConfigFolder(): Promise<void>;
-  /** The images downloaded for these shortcuts, by app ID. Games without any are left out. */
-  artwork(appIds: number[]): Promise<Record<number, ArtworkItem[]>>;
-  /** Downloads a game's images from SteamGridDB into Steam's grid folder. Needs an API key. */
+  /** The images these games have, by shortcut ID. Reads local files only; never downloads. */
+  artwork(games: ArtworkGame[]): Promise<Record<number, ArtworkEntry>>;
+  /** Downloads what a game is missing from SteamGridDB into the app's cache. Needs an API key. */
   downloadArtwork(request: ArtworkRequest): Promise<ArtworkResult>;
 }
 

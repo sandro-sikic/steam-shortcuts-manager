@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApi, createArtworkServer, parseArtworkRequest, parseGamesRequest, parseSyncRequest, systemDeps, type ApiDeps } from '../src/api.js';
@@ -6,6 +6,7 @@ import { integrations } from '../src/integrations/index.js';
 import type { Integration } from '../src/integrations/types.js';
 import { buildShortcut, MANAGED_TAG } from '../src/steam/shortcuts.js';
 import { saveShortcuts, loadShortcuts } from '../src/steam/store.js';
+import { cacheKey } from '../src/artwork/cache.js';
 import type { SecretStore } from '../src/secrets.js';
 import type { Game } from '../src/types.js';
 import { cleanupTempDirs, desktopEnv, fakeFetch, makeTempDir } from './helpers.js';
@@ -441,6 +442,7 @@ describe('api steam accounts and about', () => {
       version: '1.2.3',
       platform: 'linux',
       configFile: path.join(home, '.config', 'steam-manager', 'config.json'),
+      artworkCache: path.join(home, '.config', 'steam-manager', 'artwork-cache'),
       steamRoot: steam,
       secureStorage: true,
     });
@@ -501,17 +503,23 @@ describe('settings take effect', () => {
     expect((await api.sync({ ...request, only: ['fake'] })).added).toHaveLength(1);
   });
 
-  it('downloads only the chosen kinds of artwork', async () => {
+  it('copies only the chosen kinds of artwork into Steam, while the app’s cache gets all of them', async () => {
     const routes = {
       'https://www.steamgriddb.com/api/v2/search/autocomplete/Fortnite': { json: { success: true, data: [{ id: 1, name: 'Fortnite' }] } },
+      'https://www.steamgriddb.com/api/v2/grids/game/1?dimensions=600x900&types=static': { json: { success: true, data: [{ url: 'https://c/p.png' }] } },
+      'https://www.steamgriddb.com/api/v2/grids/game/1?dimensions=920x430,460x215&types=static': { json: { success: true, data: [] } },
       'https://www.steamgriddb.com/api/v2/heroes/game/1?types=static': { json: { success: true, data: [{ url: 'https://c/h.png' }] } },
+      'https://www.steamgriddb.com/api/v2/logos/game/1?types=static': { json: { success: true, data: [] } },
+      'https://www.steamgriddb.com/api/v2/icons/game/1?types=static': { json: { success: true, data: [] } },
+      'https://c/p.png': { body: Buffer.from('P') },
       'https://c/h.png': { body: Buffer.from('H') },
     };
-    const fetchFn = fakeFetch(routes);
-    const { api } = await setup({ env: { STEAMGRIDDB_API_KEY: 'k' }, extra: { fetchFn } });
+    const { api, home, configDir } = await setup({ env: { STEAMGRIDDB_API_KEY: 'k' }, extra: { fetchFn: fakeFetch(routes) } });
     await api.updateSettings({ artwork: { kinds: ['hero'] } });
     await api.sync({ ...request, artwork: true });
-    expect(fetchFn.requests.map((r) => r.url)).toEqual(Object.keys(routes));
+    const appId = (await api.shortcuts())[0]?.appId;
+    expect(await readdir(path.join(configDir, 'grid'))).toEqual([`${appId}_hero.png`]);
+    expect((await readdir(path.join(home, '.config', 'steam-manager', 'artwork-cache', cacheKey('Fortnite') as string))).sort()).toEqual(['hero.png', 'meta.json', 'poster.png']);
   });
 });
 
@@ -551,71 +559,91 @@ describe('api artwork', () => {
     'https://c/i.ico': { body: Buffer.from('ICON') },
   };
   const grid = (configDir: string) => path.join(configDir, 'grid');
-  const put = async (configDir: string, name: string, content = 'x') => {
-    await mkdir(grid(configDir), { recursive: true });
-    await writeFile(path.join(grid(configDir), name), content);
+  const cacheOf = (home: string, title: string) => path.join(home, '.config', 'steam-manager', 'artwork-cache', cacheKey(title) as string);
+  const put = async (dir: string, name: string, content = 'x') => {
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, name), content);
   };
 
-  it('lists the downloaded images by shortcut, in the usual order, as URLs the app serves', async () => {
-    const { api, configDir } = await setup();
-    for (const name of ['5_icon.png', '5p.png', '5_hero.jpg', '5.png', '6p.png', '7p.png', 'readme.txt']) await put(configDir, name);
-    const found = await api.artwork([5, 6, 99]);
-    expect(Object.keys(found).sort()).toEqual(['5', '6']);
-    expect(found[5]?.map((i) => i.kind)).toEqual(['poster', 'wide', 'hero', 'icon']);
-    expect(found[5]?.[0]?.url).toMatch(/^steam-manager-art:\/\/grid\/5p\.png\?v=\d+$/);
-    expect(found[6]).toHaveLength(1);
+  it('lists what each game has: the image in Steam’s folder, else the cached one, in the usual order', async () => {
+    const { api, configDir, home } = await setup();
+    for (const name of ['5_icon.png', '5p.png', '5_hero.jpg', '5.png', '6p.png', '7p.png', 'readme.txt']) await put(grid(configDir), name);
+    await put(cacheOf(home, 'Fortnite'), 'poster.jpg', 'CACHED');
+    await put(cacheOf(home, 'Fortnite'), 'logo.png', 'CACHED');
+    const found = await api.artwork([{ appId: 5, title: 'Fortnite' }, { appId: 6, title: 'Other' }, { appId: 99, title: 'Nothing' }]);
+
+    expect(Object.keys(found).sort()).toEqual(['5', '6', '99']);
+    expect(found[5]?.items.map((i) => i.kind)).toEqual(['poster', 'wide', 'hero', 'logo', 'icon']);
+    expect(found[5]?.items[0]?.url).toMatch(/^steam-manager-art:\/\/grid\/5p\.png\?v=\d+$/);
+    expect(found[5]?.items[3]?.url).toMatch(/^steam-manager-art:\/\/cache\/fortnite-[0-9a-f]{8}\/logo\.png\?v=\d+$/);
+    expect(found[6]?.items).toHaveLength(1);
+    expect(found[99]?.items).toEqual([]);
   });
 
-  it('is empty without images, and when Steam cannot be found', async () => {
-    const { api, deps } = await setup();
-    expect(await api.artwork([1])).toEqual({});
-    expect(await createApi({ ...deps, home: await makeTempDir() }).artwork([1])).toEqual({});
+  it('says which games still have images to fetch, and not for games with nothing to look up', async () => {
+    const { api, home } = await setup();
+    for (const kind of ['poster', 'wide', 'hero', 'logo', 'icon']) await put(cacheOf(home, 'Done'), `${kind}.png`);
+    await put(cacheOf(home, 'Partial'), 'poster.png');
+    const found = await api.artwork([{ appId: 1, title: 'Done' }, { appId: 2, title: 'Partial' }, { appId: 3, title: 'Never Seen' }, { appId: 4, title: '!!!' }]);
+    expect(Object.values(found).map((entry) => entry.pending)).toEqual([false, true, true, false]);
   });
 
-  it('rejects invalid app IDs', async () => {
+  it('shows cached images even when Steam cannot be found', async () => {
+    const { deps, home } = await setup();
+    await put(cacheOf(home, 'Fortnite'), 'poster.png');
+    const found = await createApi({ ...deps, home }).artwork([{ appId: 1, title: 'Fortnite' }]);
+    const nothing = await createApi({ ...deps, home: await makeTempDir() }).artwork([{ appId: 1, title: 'Fortnite' }]);
+    expect(found[1]?.items).toHaveLength(1);
+    expect(nothing[1]).toEqual({ items: [], pending: true });
+  });
+
+  it('rejects invalid games', async () => {
     const { api } = await setup();
-    await expect(api.artwork('1' as never)).rejects.toThrow('Invalid app IDs');
-    await expect(api.artwork([1.5])).rejects.toThrow('Invalid app IDs');
+    await expect(api.artwork('x' as never)).rejects.toThrow('Invalid games');
+    await expect(api.artwork([{ appId: 1.5, title: 'x' }])).rejects.toThrow('Invalid games');
+    await expect(api.artwork([{ appId: 1, title: 5 as never }])).rejects.toThrow('Invalid games');
+    await expect(api.artwork([null as never])).rejects.toThrow('Invalid games');
   });
 
-  it('downloads all the images of a game with the key, and returns what it now has', async () => {
-    const { api, configDir } = await setup({ env: { STEAMGRIDDB_API_KEY: 'k' }, extra: { fetchFn: fakeFetch(routes) } });
+  it('downloads a game’s images into the app’s cache, not into Steam’s folder, and returns what it has now', async () => {
+    const { api, home, configDir } = await setup({ env: { STEAMGRIDDB_API_KEY: 'k' }, extra: { fetchFn: fakeFetch(routes) } });
     const result = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: false });
     expect(result.outcomes.map((o) => [o.kind, o.status])).toEqual([['poster', 'saved'], ['wide', 'missing'], ['hero', 'saved'], ['logo', 'missing'], ['icon', 'saved']]);
     expect(result.items.map((i) => i.kind)).toEqual(['poster', 'hero', 'icon']);
-    expect(await readFile(path.join(grid(configDir), '7p.png'), 'utf8')).toBe('POSTER');
-    expect(await readFile(path.join(grid(configDir), '7_hero.jpg'), 'utf8')).toBe('HERO');
-    expect((await api.artwork([7]))[7]).toHaveLength(3);
+    expect(result.items[0]?.url).toContain('steam-manager-art://cache/');
+    expect(result.pending).toBe(false);
+    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'poster.png'), 'utf8')).toBe('POSTER');
+    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'hero.jpg'), 'utf8')).toBe('HERO');
+    await expect(readFile(path.join(grid(configDir), '7p.png'))).rejects.toThrow();
   });
 
-  it('keeps existing images unless forced, and downloads with the key saved in the app', async () => {
+  it('keeps cached images unless forced, and downloads with the key saved in the app', async () => {
     const secrets = memorySecrets();
     secrets.data.set('steamgriddb', 'savedkey');
     const fetchFn = fakeFetch(routes);
-    const { api, configDir } = await setup({ extra: { secrets, fetchFn } });
-    await put(configDir, '7p.png', 'OLD');
+    const { api, home } = await setup({ extra: { secrets, fetchFn } });
+    await put(cacheOf(home, 'Fortnite'), 'poster.png', 'OLD');
     const kept = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: false });
     expect(kept.outcomes[0]).toMatchObject({ kind: 'poster', status: 'exists' });
-    expect(await readFile(path.join(grid(configDir), '7p.png'), 'utf8')).toBe('OLD');
+    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'poster.png'), 'utf8')).toBe('OLD');
     expect(fetchFn.requests[0]?.auth).toBe('Bearer savedkey');
     const forced = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: true });
     expect(forced.outcomes[0]).toMatchObject({ kind: 'poster', status: 'saved' });
-    expect(await readFile(path.join(grid(configDir), '7p.png'), 'utf8')).toBe('POSTER');
+    expect(await readFile(path.join(cacheOf(home, 'Fortnite'), 'poster.png'), 'utf8')).toBe('POSTER');
   });
 
-  it('reports failures per image instead of throwing', async () => {
+  it('reports failures per image instead of throwing, and leaves the game pending so it is retried', async () => {
     const { api } = await setup({ env: { STEAMGRIDDB_API_KEY: 'bad' }, extra: { fetchFn: fakeFetch({ [`${API}/search/autocomplete/Fortnite`]: { status: 401 } }) } });
     const result = await api.downloadArtwork({ appId: 7, title: 'Fortnite', force: false });
     expect(result.outcomes.every((o) => o.status === 'failed' && o.error?.includes('HTTP 401'))).toBe(true);
     expect(result.items).toEqual([]);
+    expect(result.pending).toBe(true);
   });
 
-  it('asks for a key when there is none, and rejects bad requests or a missing Steam', async () => {
-    const { api, deps } = await setup();
+  it('asks for a key when there is none, and rejects bad requests', async () => {
+    const { api } = await setup();
     await expect(api.downloadArtwork({ appId: 1, title: 'x', force: false })).rejects.toThrow('Add a SteamGridDB API key in Settings');
     await expect(api.downloadArtwork({ appId: 'x' } as never)).rejects.toThrow('Invalid artwork request');
-    const noSteam = createApi({ ...deps, env: { STEAMGRIDDB_API_KEY: 'k' }, home: await makeTempDir() });
-    await expect(noSteam.downloadArtwork({ appId: 1, title: 'x', force: false })).rejects.toThrow('Steam installation not found');
   });
 });
 
@@ -632,14 +660,38 @@ describe('artwork server', () => {
     expect(await serve('steam-manager-art://grid/6p.png')).toEqual({ status: 404 });
     expect(await serve('steam-manager-art://grid/..%2Fsecret.png')).toEqual({ status: 400 });
     expect(await serve('steam-manager-art://grid/notes.txt')).toEqual({ status: 400 });
+    expect(await serve('steam-manager-art://grid/a/5p.png')).toEqual({ status: 400 });
     expect(await serve('steam-manager-art://other/5p.png')).toEqual({ status: 400 });
     expect(await serve('https://grid/5p.png')).toEqual({ status: 400 });
     expect(await serve('steam-manager-art://grid/%E0%A4%A')).toEqual({ status: 400 });
     expect(await serve('not a url')).toEqual({ status: 400 });
   });
 
-  it('says not found when Steam cannot be found', async () => {
-    const { deps } = await setup();
-    expect(await createArtworkServer({ ...deps, home: await makeTempDir() })('steam-manager-art://grid/5p.png')).toEqual({ status: 404 });
+  it('serves an image from the artwork cache, even encoded, and refuses anything else there', async () => {
+    const { deps, home } = await setup();
+    const serve = createArtworkServer(deps);
+    const dir = path.join(home, '.config', 'steam-manager', 'artwork-cache', cacheKey('Hades') as string);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'hero.jpg'), 'JPG');
+    const key = encodeURIComponent(cacheKey('Hades') as string);
+
+    expect(await serve(`steam-manager-art://cache/${key}/hero.jpg?v=3`)).toMatchObject({ status: 200, contentType: 'image/jpeg' });
+    expect(await serve(`steam-manager-art://cache/${key}/logo.png`)).toEqual({ status: 404 });
+    expect(await serve(`steam-manager-art://cache/${key}/meta.json`)).toEqual({ status: 400 });
+    expect(await serve('steam-manager-art://cache/..%2Fgrid/hero.jpg')).toEqual({ status: 400 });
+    expect(await serve(`steam-manager-art://cache/${key}`)).toEqual({ status: 400 });
+    expect(await serve(`steam-manager-art://cache/${key}/hero.jpg/more`)).toEqual({ status: 400 });
+    expect(await serve('steam-manager-art://cache/%E0%A4%A/hero.jpg')).toEqual({ status: 400 });
+  });
+
+  it('serves cached images without Steam, and says not found for grid images when Steam cannot be found', async () => {
+    const { deps, home } = await setup();
+    const dir = path.join(home, '.config', 'steam-manager', 'artwork-cache', cacheKey('Hades') as string);
+    await mkdir(dir, { recursive: true });
+    await writeFile(path.join(dir, 'icon.ico'), 'ICO');
+    const noSteam = createArtworkServer({ ...deps, home });
+    const elsewhere = createArtworkServer({ ...deps, home: await makeTempDir() });
+    expect(await elsewhere('steam-manager-art://grid/5p.png')).toEqual({ status: 404 });
+    expect(await noSteam(`steam-manager-art://cache/${encodeURIComponent(cacheKey('Hades') as string)}/icon.ico`)).toMatchObject({ status: 200 });
   });
 });

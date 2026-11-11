@@ -5,7 +5,7 @@ import { App } from '../../src/UI/App.js';
 import { applySettings, DEFAULT_SETTINGS } from '../../src/settingsModel.js';
 import { emptyReport, gamesReport, installApi, okStatus, settings } from './mockApi.js';
 
-const poster = (appId: number) => ({ [appId]: [{ kind: 'poster' as const, url: `steam-manager-art://grid/${appId}p.png?v=1` }] });
+const poster = (appId: number) => ({ [appId]: { items: [{ kind: 'poster' as const, url: `steam-manager-art://grid/${appId}p.png?v=1` }], pending: false } });
 
 afterEach(cleanup);
 
@@ -274,12 +274,20 @@ describe('App game page', () => {
     const mock = installApi({ artwork: vi.fn(async () => poster(1)) });
     render(<App />);
     await screen.findByText('Fortnite');
-    expect(mock.artwork).toHaveBeenCalledWith([1, 4, 5, 6, 2, 3]);
+    expect(mock.artwork).toHaveBeenCalledWith([
+      { appId: 1, title: 'Fortnite' },
+      { appId: 4, title: 'Rocket League' },
+      { appId: 5, title: 'Hades' },
+      { appId: 6, title: 'Tiny Guess' },
+      { appId: 1, title: 'Fortnite' },
+      { appId: 2, title: 'My Own Game' },
+      { appId: 3, title: 'Old Game' },
+    ]);
     await waitFor(() => expect((screen.getByText('Fortnite').closest('li') as HTMLElement).querySelector('img')?.getAttribute('src')).toBe('steam-manager-art://grid/1p.png?v=1'));
   });
 
   it('opens a game when its card is tapped, and goes back to the library', async () => {
-    installApi({ artwork: vi.fn(async () => ({ 1: [{ kind: 'hero' as const, url: 'steam-manager-art://grid/1_hero.png' }] })) });
+    installApi({ artwork: vi.fn(async () => ({ 1: { items: [{ kind: 'hero' as const, url: 'steam-manager-art://grid/1_hero.png' }], pending: false } })) });
     render(<App />);
     await screen.findByText('Fortnite');
     fireEvent.click(screen.getByRole('button', { name: 'Open Fortnite' }));
@@ -307,7 +315,7 @@ describe('App game page', () => {
   it('shows downloaded images straight away, on the page and in the library', async () => {
     const mock = installApi({
       apiKeyStatus: vi.fn(async () => ({ set: true, source: 'saved' as const, secureStorage: true })),
-      downloadArtwork: vi.fn(async () => ({ outcomes: [], items: [{ kind: 'poster' as const, url: 'steam-manager-art://grid/4p.png?v=2' }] })),
+      downloadArtwork: vi.fn(async () => ({ outcomes: [], items: [{ kind: 'poster' as const, url: 'steam-manager-art://grid/4p.png?v=2' }], pending: false })),
     });
     render(<App />);
     await screen.findByText('Rocket League');
@@ -352,5 +360,124 @@ describe('App game page', () => {
     render(<App />);
     expect((await screen.findByRole('alert')).textContent).toBe('Invalid app IDs');
     expect(screen.getByText('Fortnite')).toBeTruthy();
+  });
+});
+
+describe('App background artwork download', () => {
+  const pending = (appId: number, isPending = true) => ({ [appId]: { items: [], pending: isPending } });
+  const lookups = { ...pending(1, false), ...pending(4), ...pending(5), ...pending(6) };
+  const withKey = { apiKeyStatus: vi.fn(async () => ({ set: true, source: 'saved' as const, secureStorage: true })) };
+  const posterResult = (appId: number) => ({ outcomes: [], items: [{ kind: 'poster' as const, url: `steam-manager-art://cache/g/poster.png?v=${appId}` }], pending: false });
+  const posterOf = (title: string) => (screen.getByText(title).closest('li') as HTMLElement).querySelector('img');
+
+  it('downloads the artwork of every game that is missing some, one at a time, and shows the posters as they arrive', async () => {
+    const downloadArtwork = vi.fn(async ({ appId }: { appId: number; title: string; force: boolean }) => posterResult(appId));
+    const mock = installApi({ ...withKey, artwork: vi.fn(async () => lookups), downloadArtwork });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    await waitFor(() => expect(mock.downloadArtwork).toHaveBeenCalledTimes(3));
+    expect(downloadArtwork.mock.calls.map(([request]) => [request.appId, request.title, request.force])).toEqual([[4, 'Rocket League', false], [5, 'Hades', false], [6, 'Tiny Guess', false]]);
+    await waitFor(() => expect(posterOf('Rocket League')?.getAttribute('src')).toBe('steam-manager-art://cache/g/poster.png?v=4'));
+    expect(posterOf('Hades')?.getAttribute('src')).toBe('steam-manager-art://cache/g/poster.png?v=5');
+    expect(posterOf('Fortnite')).toBeNull();
+    await waitFor(() => expect(screen.queryByLabelText('Artwork download progress')).toBeNull());
+  });
+
+  it('shows progress while it works', async () => {
+    const resolvers: ((value: ReturnType<typeof posterResult>) => void)[] = [];
+    const downloadArtwork = vi.fn(() => new Promise<ReturnType<typeof posterResult>>((resolve) => resolvers.push(resolve)));
+    installApi({ ...withKey, artwork: vi.fn(async () => ({ ...pending(4), ...pending(5) })), downloadArtwork });
+    render(<App />);
+    await waitFor(() => expect(screen.getByRole('status', { name: '' }).textContent).toContain('Downloading artwork: 1 of 2'));
+    resolvers[0]?.(posterResult(4));
+    await waitFor(() => expect(screen.getByText(/Downloading artwork: 2 of 2/)).toBeTruthy());
+    resolvers[1]?.(posterResult(5));
+    await waitFor(() => expect(screen.queryByText(/Downloading artwork/)).toBeNull());
+  });
+
+  it('does nothing without a key, or when automatic downloads are switched off', async () => {
+    const noKey = installApi({ artwork: vi.fn(async () => lookups) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    await waitFor(() => expect(noKey.apiKeyStatus).toHaveBeenCalled());
+    expect(noKey.downloadArtwork).not.toHaveBeenCalled();
+    cleanup();
+
+    const off = installApi({ ...withKey, artwork: vi.fn(async () => lookups), settings: vi.fn(async () => applySettings(settings, { artwork: { auto: false } })) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    expect(off.apiKeyStatus).not.toHaveBeenCalled();
+    expect(off.downloadArtwork).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when every game already has its artwork, and survives a key status failure', async () => {
+    const done = installApi({ ...withKey, artwork: vi.fn(async () => ({ ...pending(1, false), ...pending(4, false) })) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    expect(done.downloadArtwork).not.toHaveBeenCalled();
+    cleanup();
+
+    const broken = installApi({ artwork: vi.fn(async () => lookups), apiKeyStatus: vi.fn(async () => { throw new Error('no keychain'); }) });
+    render(<App />);
+    await screen.findByText('Fortnite');
+    await waitFor(() => expect(broken.apiKeyStatus).toHaveBeenCalled());
+    expect(broken.downloadArtwork).not.toHaveBeenCalled();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('carries on with the next game when one fails', async () => {
+    const downloadArtwork = vi.fn(async ({ appId }: { appId: number }) => {
+      if (appId === 4) throw new Error('offline');
+      return posterResult(appId);
+    });
+    installApi({ ...withKey, artwork: vi.fn(async () => ({ ...pending(4), ...pending(5) })), downloadArtwork });
+    render(<App />);
+    await waitFor(() => expect(downloadArtwork).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(posterOf('Hades')?.getAttribute('src')).toContain('v=5'));
+    expect(posterOf('Rocket League')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('keeps games that are still pending after a download pending, and stops when the app is closed', async () => {
+    const resolvers: ((value: ReturnType<typeof posterResult>) => void)[] = [];
+    const downloadArtwork = vi.fn(() => new Promise<ReturnType<typeof posterResult>>((resolve) => resolvers.push(resolve)));
+    installApi({ ...withKey, artwork: vi.fn(async () => ({ ...pending(4), ...pending(5), ...pending(6) })), downloadArtwork });
+    const { unmount } = render(<App />);
+    await waitFor(() => expect(downloadArtwork).toHaveBeenCalledTimes(1));
+    unmount();
+    resolvers[0]?.(posterResult(4));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(downloadArtwork).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts over for a refreshed library, ignoring results of the run it replaced', async () => {
+    const resolvers: ((value: ReturnType<typeof posterResult>) => void)[] = [];
+    const downloadArtwork = vi.fn(() => new Promise<ReturnType<typeof posterResult>>((resolve) => resolvers.push(resolve)));
+    installApi({ ...withKey, artwork: vi.fn(async () => ({ ...pending(4), ...pending(5) })), downloadArtwork });
+    render(<App />);
+    await waitFor(() => expect(downloadArtwork).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
+    await waitFor(() => expect(downloadArtwork).toHaveBeenCalledTimes(2));
+    resolvers[0]?.(posterResult(4)); // the old run: ignored
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(posterOf('Rocket League')).toBeNull();
+    resolvers[1]?.(posterResult(4));
+    await waitFor(() => expect(posterOf('Rocket League')).not.toBeNull());
+  });
+
+  it('can also be started from the game page, which updates what the library shows', async () => {
+    installApi({
+      ...withKey,
+      settings: vi.fn(async () => applySettings(settings, { artwork: { auto: false } })),
+      downloadArtwork: vi.fn(async () => posterResult(4)),
+    });
+    render(<App />);
+    await screen.findByText('Rocket League');
+    fireEvent.click(screen.getByRole('button', { name: 'Open Rocket League' }));
+    await waitFor(() => expect((screen.getByRole('button', { name: 'Download artwork' }) as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(screen.getByRole('button', { name: 'Download artwork' }));
+    await waitFor(() => expect(screen.getByRole('img', { name: 'Poster image' })).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Library' }));
+    expect(posterOf('Rocket League')?.getAttribute('src')).toContain('v=4');
   });
 });
